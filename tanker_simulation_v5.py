@@ -277,7 +277,7 @@ JASMINES_LOAD_RATE_BPH    = 4_000   # JasmineS (85,000 bbl / 21.25 h)
 WESTMORE_LOAD_RATE_BPH    = 2_000   # Westmore
 DUKE_LOAD_RATE_BPH        = 3_500   # Duke
 STARTURN_LOAD_RATE_BPH    = 2_500   # Starturn
-PGM_LOAD_RATE_BPH         = 440   # PGM (Point G) — SantaMonica loads at 60% reduction (440 bph)
+PGM_LOAD_RATE_BPH         = 440   # PGM (Point G) — SantaMonica loads at 75% reduction (440 bph)
 
 # ── SECTION G: DISCHARGE / EXPORT RATES (bbl/hr) ─────────────────────────────
 #  Operation         Rate (bph)   Notes
