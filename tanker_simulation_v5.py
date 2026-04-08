@@ -244,7 +244,7 @@ LAPHROAIG_PERMITTED_STORAGES = (
 # ── SECTION C: PRODUCTION RATES (bbl/hr) ─────────────────────────────────────
 #  Storage          Rate (bph)   Notes
 # ─────────────────────────────────────────────────────────────────────────────
-PRODUCTION_RATE_BPH          = 1_870   # Chapel & JasmineS (Point A)
+PRODUCTION_RATE_BPH          = 1_600   # Chapel & JasmineS (Point A)
 WESTMORE_PRODUCTION_RATE_BPH =   960   # Westmore (Point C)
 DUKE_PRODUCTION_RATE_BPH     =   250   # Duke (Point D)
 STARTURN_PRODUCTION_RATE_BPH =    83   # Starturn (Point E)
@@ -277,13 +277,13 @@ JASMINES_LOAD_RATE_BPH    = 4_000   # JasmineS (85,000 bbl / 21.25 h)
 WESTMORE_LOAD_RATE_BPH    = 2_000   # Westmore
 DUKE_LOAD_RATE_BPH        = 3_500   # Duke
 STARTURN_LOAD_RATE_BPH    = 2_500   # Starturn
-PGM_LOAD_RATE_BPH         = 1_000   # PGM (Point G) — SantaMonica loads at 60% reduction (1,000 bph)
+PGM_LOAD_RATE_BPH         = 440   # PGM (Point G) — SantaMonica loads at 60% reduction (440 bph)
 
 # ── SECTION G: DISCHARGE / EXPORT RATES (bbl/hr) ─────────────────────────────
 #  Operation         Rate (bph)   Notes
 # ─────────────────────────────────────────────────────────────────────────────
 EXPORT_RATE_BPH            = 20_000   # Mother vessel export pump rate
-SANJULIAN_TRANSLOAD_RATE_BPH = 12_000 # SanJulian → primary mother transfer rate
+SANJULIAN_TRANSLOAD_RATE_BPH = 10_000 # SanJulian → primary mother transfer rate
 
 # ── SECTION H: POINT A LOAD CAP ──────────────────────────────────────────────
 POINT_A_LOAD_CAP_BBL = 63_000   # Max load at Point A for POINT_A_LOAD_CAP_VESSELS
