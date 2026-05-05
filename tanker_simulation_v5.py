@@ -5077,6 +5077,82 @@ class Simulation:
                                     selected_meta["mother"],
                                 )
 
+                        # ── MTO queued discharger override ───────────────────
+                        # If this vessel was flagged at startup as a queued MTO
+                        # discharger (_mto_target_vessel set), route it to the
+                        # transient vessel instead of a primary mother.
+                        _mto_tv_attr = getattr(v, "_mto_target_vessel", None)
+                        if _mto_tv_attr:
+                            # Find the transient receiver vessel
+                            _recv_v = next(
+                                (vv for vv in self.vessels if vv.name == _mto_tv_attr
+                                 and getattr(vv, "_mto_transient_since_day", None) is not None),
+                                None
+                            )
+                            if _recv_v is not None:
+                                # Check receiver has headroom for this discharger
+                                _trn_cap   = MTO_TRANSIENT_CAPACITY_BBL.get(
+                                    _recv_v.name, _recv_v.cargo_capacity)
+                                _headroom  = max(0.0, _trn_cap - _recv_v.cargo_bbl)
+                                _berth_free = getattr(_recv_v, "_mto_berth_free_at", 0.0)
+
+                                if _headroom >= v.cargo_bbl and _berth_free <= arrival:
+                                    # Execute the MTO transfer immediately
+                                    _dis_api   = self.vessel_api.get(v.name, 0.0)
+                                    _trn_api   = self.vessel_api.get(_recv_v.name, 0.0)
+                                    _trn_old   = _recv_v.cargo_bbl
+                                    _xfer      = min(v.cargo_bbl, _headroom)
+                                    _new_trn   = _trn_old + _xfer
+                                    if _new_trn > 0:
+                                        self.vessel_api[_recv_v.name] = (
+                                            (_trn_old * _trn_api + _xfer * _dis_api) / _new_trn
+                                        )
+                                    _recv_v.cargo_bbl = _new_trn
+                                    _recv_v._mto_parcels_received = getattr(
+                                        _recv_v, "_mto_parcels_received", 0) + 1
+
+                                    _mto_rate   = VESSEL_DISCHARGE_RATE_BPH.get(v.name)
+                                    _pump_h     = (_xfer / _mto_rate) if _mto_rate else DISCHARGE_HOURS
+                                    _cast_t     = self.next_cast_off_window(
+                                        arrival + BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS + _pump_h
+                                    )
+                                    _end_t      = _cast_t + CAST_OFF_HOURS
+                                    _recv_v._mto_berth_free_at = _end_t
+
+                                    v.cargo_bbl       = 0
+                                    self.vessel_api[v.name] = 0.0
+                                    v.status          = "CAST_OFF_B"
+                                    v.next_event_time = _end_t
+                                    v._mto_target_vessel = None  # clear flag
+
+                                    _recv_v.status          = "WAITING_BERTH_B"
+                                    _recv_v.next_event_time = self.next_daylight_hourly_berth_check(
+                                        arrival, point="B"
+                                    )
+
+                                    self.log_event(
+                                        arrival, v.name, "MTO_DISCHARGE_TO_TRANSIENT",
+                                        f"[MTO queued arrival] {v.name} → {_recv_v.name}: "
+                                        f"{_xfer:,.0f} bbl | pump {_pump_h:.1f}h | "
+                                        f"cast-off {self.hours_to_dt(_end_t).strftime('%H:%M')}",
+                                        voyage_num=v.current_voyage,
+                                    )
+                                    continue  # skip normal mother assignment
+                                else:
+                                    # Receiver berth busy — wait until it frees
+                                    v.status          = "WAITING_BERTH_B"
+                                    v.next_event_time = max(arrival, _berth_free) + 0.5
+                                    v.assigned_mother = None
+                                    self.log_event(
+                                        arrival, v.name, "WAITING_BERTH_B",
+                                        f"MTO queued for {_recv_v.name}; transient berth busy until "
+                                        f"{self.hours_to_dt(_berth_free).strftime('%H:%M')} — waiting",
+                                        voyage_num=v.current_voyage,
+                                    )
+                                    continue
+                            # If receiver not found or no longer transient, fall through to normal logic
+                            v._mto_target_vessel = None
+
                         start, berth_t, selected_mother = selected
                         v.assigned_mother = selected_mother
                         if start > arrival + 0.01:

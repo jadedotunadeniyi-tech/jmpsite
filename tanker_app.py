@@ -1819,10 +1819,11 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                     v.assigned_mother = _tm
 
                 # ── MTO discharger: transferring cargo to a shuttle receiver ──
-                # The sim's automatic MTO gate won't fire for startup-day pairs
-                # because the discharger is already set to DISCHARGING (not WAITING).
-                # We handle this by directly crediting the transfer to the receiver
-                # vessel and setting both vessels to the correct post-transfer state.
+                # Two cases:
+                # 1. DISCHARGING/HOSE_CONNECT_B/BERTHING_B: mid-transfer at t=0
+                #    → directly credit cargo, set timing
+                # 2. SAILING_AB_LEG2: queued next discharger (e.g. Rathbone inbound)
+                #    → flag v._mto_target_vessel so arrival handler routes to transient
                 _mto_tv = d.get("mto_target_vessel")
                 if _mto_tv:
                     v.assigned_mother = None   # not a real mother discharge
@@ -1894,6 +1895,14 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                             0, v.name, "MTO_DISCHARGE_TO_TRANSIENT",
                             f"[MTO Startup seed] {v.name} → {_mto_tv}: "
                             f"{_transfer_bbl:,.0f} bbl | status: {v.status}",
+                        )
+                    elif v.status == "SAILING_AB_LEG2":
+                        # Queued next MTO discharger — flag for arrival handler
+                        v._mto_target_vessel = _mto_tv
+                        sim.log_event(
+                            0, v.name, "MTO_DISCHARGE_TO_TRANSIENT",
+                            f"[MTO Startup seed] {v.name} queued → {_mto_tv} "
+                            f"({v.cargo_bbl:,.0f} bbl | inbound — will discharge on arrival)",
                         )
 
                 # MTO receiver: flag as transient (set by discharger block above,
@@ -5019,19 +5028,28 @@ def main():
                     _stor   = "Ibom"
                     _cargo  = _ibom_stock
                 elif _vname == _mto_receiver_name:
-                    # MTO receiver — accumulating cargo from discharger vessels
+                    # MTO receiver — accumulating cargo from dischargers
                     _status = "PF_SWAP"
                     _stor   = ""
                     _mom    = ""
-                elif _vname in _mto_dischargers:
-                    # MTO discharger — pumping cargo into the receiver vessel
-                    _status = "DISCHARGING"
-                    _mom    = _mto_receiver_name  # receiver is the "mother" in MTO context
-                    _stor   = ""
-                elif ("moor alongside mt " + _mto_receiver_name.lower()) in _next_comment.lower() and _mto_receiver_name:
-                    # Sailing to moor alongside the MTO receiver for discharge
+                elif (_vname in _mto_dischargers
+                      and _mto_receiver_name
+                      and ("moor alongside mt " + _mto_receiver_name.lower()) in _next_comment.lower()
+                      and "ongoing" not in _comment):
+                    # In mto_dischargers but NOT actively pumping — sailing inbound to discharge next
                     _status = "SAILING_AB_LEG2"
+                    _mom    = ""   # mto_target_vessel carries the pairing
+                    _stor   = ""
+                elif _vname in _mto_dischargers and ("ongoing" in _comment or "discharge" in _comment):
+                    # Actively discharging to MTO receiver right now
+                    _status = "DISCHARGING"
                     _mom    = _mto_receiver_name
+                    _stor   = ""
+                elif _vname in _mto_dischargers:
+                    # In dischargers list but unclear status — default to DISCHARGING
+                    _status = "DISCHARGING"
+                    _mom    = _mto_receiver_name
+                    _stor   = ""
                 elif "loading is still ongoing" in _comment and _stor:
                     _status = "LOADING"
                 elif "loading" in _comment and "ongoing" in _comment and _stor:
@@ -5070,16 +5088,32 @@ def main():
                     _status = "SAILING_AB_LEG2" if _cargo > 0 else "IDLE_A"
 
                 _is_recv = (_vname == _mto_receiver_name)
-                _mto_tv  = _mto_receiver_name if _vname in _mto_dischargers else ""
+                # mto_target_vessel set for both active dischargers AND inbound queued dischargers
+                _is_queued_mto = (
+                    bool(_mto_receiver_name)
+                    and _status == "SAILING_AB_LEG2"
+                    and ("moor alongside mt " + _mto_receiver_name.lower()) in _next_comment.lower()
+                )
+                _mto_tv  = _mto_receiver_name if (_vname in _mto_dischargers or _is_queued_mto) else ""
+
+                # For actively discharging MTO vessels, compute how much was already pumped
+                # prev_prediction (col 5) - current_rob (col 9) = volume already transferred
+                _already_xfr = 0
+                if _status == "DISCHARGING" and _mto_tv:
+                    _prev_pred = abs(_num(rows, _r, 5))
+                    _already_xfr = max(0, _prev_pred - _cargo)
+
                 daughter_vessels.append({
-                    "name":             _vname,
-                    "cargo_bbl":        _cargo,
-                    "status":           _status,
-                    "assigned_storage": _stor,
-                    "target_mother":    _mom if not _mto_tv else "",  # clear mother for MTO
-                    "mto_target_vessel": _mto_tv,       # shuttle receiver (e.g. "Watson")
-                    "is_mto_receiver":   _is_recv,      # True if this vessel IS the MTO receiver
-                    "notes":            _cell(rows, _r, 10)[:80],
+                    "name":              _vname,
+                    "cargo_bbl":         _cargo,
+                    "status":            _status,
+                    "assigned_storage":  _stor,
+                    "target_mother":     _mom if not _mto_tv else "",
+                    "mto_target_vessel": _mto_tv,
+                    "is_mto_receiver":   _is_recv,
+                    "already_transferred_bbl": _already_xfr,
+                    "nominated_load_bbls": None,
+                    "notes":             _cell(rows, _r, 10)[:80],
                 })
 
             # Apply MTSanBarth discharge target to mother_volumes entry so
