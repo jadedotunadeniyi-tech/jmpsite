@@ -1818,108 +1818,117 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                 if _tm and _tm in getattr(mod, "MOTHER_NAMES", []):
                     v.assigned_mother = _tm
 
-                # ── MTO discharger: transferring cargo to a shuttle receiver ──
-                # Two cases:
-                # 1. DISCHARGING/HOSE_CONNECT_B/BERTHING_B: mid-transfer at t=0
-                #    → directly credit cargo, set timing
-                # 2. SAILING_AB_LEG2: queued next discharger (e.g. Rathbone inbound)
-                #    → flag v._mto_target_vessel so arrival handler routes to transient
-                _mto_tv = d.get("mto_target_vessel")
+                # ── MTO startup seeding ─────────────────────────────────────
+                # Case A — DISCHARGING/HOSE_CONNECT_B/BERTHING_B:
+                #   Active discharger at t=0. Directly credit transfer, set timing,
+                #   log MTO_TRANSIENT_NOMINATED on receiver + MTO_DISCHARGE_TO_TRANSIENT
+                #   on discharger so Day 1 of the journey plan shows correctly.
+                # Case B — SAILING_AB_LEG2 with mto_target_vessel:
+                #   Queued next discharger (inbound). Flag _mto_target_vessel so the
+                #   arrival handler routes to the transient instead of a mother.
+                # Case C — is_mto_receiver:
+                #   Receiver vessel. Flag _mto_transient_since_day and set WAITING_BERTH_B.
+                _mto_tv      = d.get("mto_target_vessel") or ""
+                _is_mto_recv = d.get("is_mto_receiver", False)
+
                 if _mto_tv:
-                    v.assigned_mother = None   # not a real mother discharge
-                    # Find the receiver vessel in sim.vessels
+                    v.assigned_mother = None  # not a real mother discharge
                     _mto_recv_v = next(
                         (vv for vv in sim.vessels if vv.name == _mto_tv), None
                     )
-                    if _mto_recv_v is not None:
-                        # Flag receiver as active MTO transient
+
+                    if v.status == "SAILING_AB_LEG2":
+                        # Case B — queued inbound discharger
+                        v._mto_target_vessel = _mto_tv
+                        # Ensure receiver is flagged even if its dict entry hasn't run yet
+                        if _mto_recv_v is not None:
+                            _mto_recv_v._mto_transient_since_day = 0
+                            _mto_recv_v.status = "WAITING_BERTH_B"
+                        sim.log_event(
+                            0, v.name, "MTO_DISCHARGE_TO_TRANSIENT",
+                            f"[MTO Startup seed] {v.name} queued → {_mto_tv}: "
+                            f"{v.cargo_bbl:,.0f} bbl inbound — will discharge on arrival",
+                        )
+
+                    elif _mto_recv_v is not None:
+                        # Case A — active discharger at t=0
+                        # Ensure receiver is flagged
                         _mto_recv_v._mto_transient_since_day = 0
-                        _mto_recv_v._mto_parcels_received    = getattr(
+                        _mto_recv_v._mto_parcels_received = getattr(
                             _mto_recv_v, "_mto_parcels_received", 0) + 1
 
-                        # Transfer cargo from discharger to receiver
                         _transfer_bbl = v.cargo_bbl
                         _dis_api_val  = sim.vessel_api.get(v.name, 0.0)
                         _recv_bbl_old = _mto_recv_v.cargo_bbl
                         _recv_api_old = sim.vessel_api.get(_mto_recv_v.name, 0.0)
-                        _total_recv   = _recv_bbl_old + _transfer_bbl
+                        _mto_rate     = getattr(mod, "VESSEL_DISCHARGE_RATE_BPH",
+                                                {}).get(v.name, 5_000)
+                        _mto_pump_h   = (_transfer_bbl / _mto_rate) if _mto_rate else 12.0
+                        _mto_hose_h   = getattr(mod, "HOSE_CONNECTION_HOURS", 2.0)
+                        _mto_bert_h   = getattr(mod, "BERTHING_DELAY_HOURS",  0.5)
+                        _mto_coff_h   = getattr(mod, "CAST_OFF_HOURS",        0.2)
 
-                        # Blend API into receiver
-                        if _total_recv > 0:
-                            sim.vessel_api[_mto_recv_v.name] = (
-                                (_recv_bbl_old * _recv_api_old
-                                 + _transfer_bbl * _dis_api_val) / _total_recv
-                            )
-                        _mto_recv_v.cargo_bbl = _total_recv
-
-                        # Compute transfer timing for discharger
-                        _mto_rate   = getattr(mod, "VESSEL_DISCHARGE_RATE_BPH",
-                                              {}).get(v.name, 5_000)
-                        _mto_pump_h = (_transfer_bbl / _mto_rate) if _mto_rate else 12.0
-                        _mto_hose_h = getattr(mod, "HOSE_CONNECTION_HOURS", 2.0)
-                        _mto_bert_h = getattr(mod, "BERTHING_DELAY_HOURS",  0.5)
-                        _mto_coff_h = getattr(mod, "CAST_OFF_HOURS",        0.2)
-
-                        if v.status in {"DISCHARGING"}:
-                            # Mid-pump — remaining time proportional to cargo
-                            _xfr_done = int(d.get("already_transferred_bbl", 0))
+                        if v.status == "DISCHARGING":
+                            _xfr_done  = int(d.get("already_transferred_bbl", 0))
                             _remaining = max(0, _transfer_bbl - _xfr_done)
-                            v.cargo_bbl = _remaining
-                            if _remaining > 0:
-                                _mto_recv_v.cargo_bbl = _recv_bbl_old + _xfr_done
-                                v.next_event_time = (
-                                    _remaining / _mto_rate if _mto_rate else _mto_pump_h
-                                )
-                            else:
-                                v.status         = "CAST_OFF_B"
-                                v.cargo_bbl      = 0
-                                v.next_event_time = _mto_coff_h
-                        elif v.status in {"HOSE_CONNECT_B", "BERTHING_B",
-                                          "WAITING_BERTH_B"}:
-                            # Pre-pump — discharger hasn't started yet
-                            v.cargo_bbl = _transfer_bbl   # still holds its cargo
-                            _mto_recv_v.cargo_bbl = _recv_bbl_old  # nothing transferred yet
-                            sim.vessel_api[_mto_recv_v.name] = _recv_api_old  # restore
+                            # Receiver already has _xfr_done credited in cargo_bbl from startup
+                            # so we only need to set the remaining on the discharger
+                            v.cargo_bbl       = _remaining
+                            v.next_event_time = (
+                                (_remaining / _mto_rate) if (_mto_rate and _remaining > 0) else _mto_coff_h
+                            )
+                            if _remaining <= 0:
+                                v.status = "CAST_OFF_B"
+                        elif v.status in {"HOSE_CONNECT_B", "BERTHING_B", "WAITING_BERTH_B"}:
+                            # Pre-pump — cargo not yet transferred
+                            v.cargo_bbl = _transfer_bbl
+                            _mto_recv_v.cargo_bbl = _recv_bbl_old   # no transfer yet
+                            sim.vessel_api[_mto_recv_v.name] = _recv_api_old
                             if v.status == "HOSE_CONNECT_B":
                                 v.next_event_time = _mto_hose_h + _mto_pump_h
                             else:
                                 v.next_event_time = _mto_bert_h + _mto_hose_h + _mto_pump_h
+                            # Credit full transfer to receiver for the NOMINATED log
+                            _total_recv = _recv_bbl_old + _transfer_bbl
+                            if _total_recv > 0:
+                                sim.vessel_api[_mto_recv_v.name] = (
+                                    (_recv_bbl_old * _recv_api_old
+                                     + _transfer_bbl * _dis_api_val) / _total_recv
+                                )
+                            _mto_recv_v.cargo_bbl = _total_recv
 
-                        # Lock transient berth until transfer + cast-off completes
+                        # Lock transient berth
                         _mto_lock_until = v.next_event_time + _mto_coff_h
                         _mto_recv_v._mto_berth_free_at = _mto_lock_until
-                        _mto_recv_v.status = "WAITING_BERTH_B"
+                        _mto_recv_v.status          = "WAITING_BERTH_B"
                         _mto_recv_v.next_event_time = 0.0
 
+                        # Log MTO_TRANSIENT_NOMINATED on the RECEIVER (Watson) at t=0
+                        # so the Day 1 journey plan column shows the MTO block correctly.
+                        _trn_cap_log = getattr(mod, "MTO_TRANSIENT_CAPACITY_BBL",
+                                               {}).get(_mto_recv_v.name,
+                                                       _mto_recv_v.cargo_capacity)
                         sim.log_event(
-                            0, v.name, "MTO_DISCHARGE_TO_TRANSIENT",
-                            f"[MTO Startup seed] {v.name} → {_mto_tv}: "
-                            f"{_transfer_bbl:,.0f} bbl | status: {v.status}",
+                            0, _mto_recv_v.name, "MTO_TRANSIENT_NOMINATED",
+                            f"[MTO Day 1 — Parcel 1/1] "
+                            f"Received {_transfer_bbl:,.0f} bbl from {v.name} "
+                            f"@ {_dis_api_val:.2f}° API | on-board: {_mto_recv_v.cargo_bbl:,.0f} bbl "
+                            f"(cap {_trn_cap_log:,.0f} bbl) | "
+                            f"berth locked until startup+{_mto_lock_until:.1f}h",
+                            voyage_num=_mto_recv_v.current_voyage,
                         )
-                    elif v.status == "SAILING_AB_LEG2":
-                        # Queued next MTO discharger — flag for arrival handler
-                        v._mto_target_vessel = _mto_tv
+                        # Log MTO_DISCHARGE_TO_TRANSIENT on the DISCHARGER (Balham)
                         sim.log_event(
                             0, v.name, "MTO_DISCHARGE_TO_TRANSIENT",
-                            f"[MTO Startup seed] {v.name} queued → {_mto_tv} "
-                            f"({v.cargo_bbl:,.0f} bbl | inbound — will discharge on arrival)",
+                            f"[MTO Day 1] Startup seed: berthing+hose+pump to {_mto_recv_v.name}: "
+                            f"{_transfer_bbl:,.0f} bbl | status at 08:00: {v.status}",
+                            voyage_num=v.current_voyage,
                         )
 
-                # MTO receiver: flag as transient (set by discharger block above,
-                # but also handle the case where receiver has no discharger at t=0)
-                _is_mto_recv = d.get("is_mto_receiver", False)
                 if _is_mto_recv:
+                    # Case C — receiver vessel
                     v._mto_transient_since_day = 0
-                    if not any(
-                        dd.get("mto_target_vessel") == v.name
-                        for dd in vs.values()
-                        if isinstance(dd, dict)
-                    ):
-                        # No discharger paired — set receiver to WAITING_BERTH_B
-                        # so it can proceed to a mother once accumulation is done
-                        v.status = "WAITING_BERTH_B"
-                    else:
-                        v.status = "WAITING_BERTH_B"
+                    v.status = "WAITING_BERTH_B"
 
                 # ── Nominated load ceiling (for PF_LOADING startup vessels) ────
                 # Prevents the Ibom vessel from jumping to full capacity on Day 1.
@@ -8230,6 +8239,7 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
         def _mto_dcell():
             # Slice log_df for THIS day
             _day_rows = log_df[log_df["Day"] == _day]
+            import re as _re
             _mto_nom = _day_rows[
                 _day_rows["Event"] == "MTO_TRANSIENT_NOMINATED"
             ].to_dict("records")
@@ -8239,24 +8249,27 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             if not _mto_nom and not _mto_dis:
                 return f'<td style="text-align:center;background:#f0fdf4">{_idle()}</td>'
 
-            # Group nominations by transient vessel — each unique transient gets
-            # its own block so multiple MTO ops on the same day are all visible.
-            import re as _re
+            # Group nominations by transient vessel
             _seen_transients = {}  # transient_name -> list of nomination records
             for _nr in _mto_nom:
                 _tn = _nr["Vessel"]
                 _seen_transients.setdefault(_tn, []).append(_nr)
 
             # Map discharger events back to transient by parsing Detail text
-            _dis_by_transient = {}  # transient_name -> list of discharge records
+            # Detail format: "... → {transient_name}: ..." or "... to {transient_name}: ..."
+            _dis_by_transient = {}
             for _dr in _mto_dis:
-                # Detail contains "to {transient_name}:"
-                _dt_match = _re.search(r"to\s+(\w+):", _dr.get("Detail", ""))
+                _det = _dr.get("Detail", "")
+                _dt_match = (_re.search(r"→\s*(\w+)\s*:", _det)
+                             or _re.search(r"to\s+(\w+)\s*:", _det))
                 _trn_key = _dt_match.group(1) if _dt_match else None
-                if _trn_key and _trn_key in _seen_transients:
+
+                if _trn_key:
+                    # Add to seen_transients even if there's no NOM event (startup seeds)
+                    if _trn_key not in _seen_transients:
+                        _seen_transients[_trn_key] = []  # empty nom list — dis-only block
                     _dis_by_transient.setdefault(_trn_key, []).append(_dr)
                 else:
-                    # Fallback: attach to first transient if can't parse
                     _fb = next(iter(_seen_transients), None)
                     if _fb:
                         _dis_by_transient.setdefault(_fb, []).append(_dr)

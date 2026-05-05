@@ -28,7 +28,7 @@ import random
 # Version identifier — read by tanker_app.py to auto-clear Streamlit cache
 # on deployment. Bump this string whenever the sim logic changes in a way
 # that would invalidate cached run_sim() results.
-SIM_VERSION = "5.18"
+SIM_VERSION = "5.19"
 
 # -----------------------------------------------------------------
 # VOYAGE CODE SYSTEM
