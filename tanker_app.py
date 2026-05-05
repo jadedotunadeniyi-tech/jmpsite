@@ -1911,6 +1911,54 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                 # (LOADING partial-cargo resume is handled by the universal
                 #  post-processing pass that runs after all defaults are applied)
 
+    # ── Seed MTSanBarth startup discharge state from vessel_states_json ────────
+    # mtsanbarth_status/target are sim-level attributes (not vessel objects).
+    # If the operator set MTSanBarth to DISCHARGING/HOSE_CONNECT_B/BERTHING_B,
+    # seed the sim state machine so it resumes mid-cycle rather than starting fresh.
+    if vessel_states_json:
+        _vs_sj = json.loads(vessel_states_json)
+        _sj_startup = _vs_sj.get(getattr(mod, "MOTHER_QUATERNARY_NAME", "MTSanBarth"), {})
+        if _sj_startup.get("_is_mtsanbarth"):
+            _sj_st  = _sj_startup.get("status", "IDLE_B")
+            _sj_tgt = _sj_startup.get("target_mother") or None
+            _sj_bbl = float(_sj_startup.get("cargo_bbl", 0))
+
+            if _sj_st in {"BERTHING_B", "HOSE_CONNECT_B", "DISCHARGING",
+                          "WAITING_BERTH_B", "WAITING_MOTHER_CAPACITY",
+                          "WAITING_MOTHER_RETURN"} and _sj_tgt:
+                # Seed the discharge cycle — MTSanBarth is mid-operation at startup
+                _sj_rate = getattr(mod, "MTSANBARTH_TRANSLOAD_RATE_BPH", 5_000)
+                _pump_h  = _sj_bbl / _sj_rate if _sj_rate > 0 else 12.0
+                _hose_h  = getattr(mod, "HOSE_CONNECTION_HOURS", 2.0)
+                _bert_h  = getattr(mod, "BERTHING_DELAY_HOURS",  0.5)
+
+                sim.mtsanbarth_status = _sj_st
+                sim.mtsanbarth_target = _sj_tgt
+                sim.mtsanbarth_amount = _sj_bbl
+
+                if _sj_st == "BERTHING_B":
+                    sim.mtsanbarth_next_t = _bert_h
+                elif _sj_st == "HOSE_CONNECT_B":
+                    sim.mtsanbarth_next_t = _hose_h
+                elif _sj_st == "DISCHARGING":
+                    sim.mtsanbarth_next_t = _pump_h
+                else:
+                    sim.mtsanbarth_next_t = 0.0
+
+                # Reserve mother berth for the remaining discharge window
+                _remaining = (sim.mtsanbarth_next_t or 0.0)
+                sim.mother_berth_free_at[_sj_tgt] = max(
+                    sim.mother_berth_free_at.get(_sj_tgt, 0.0), _remaining
+                )
+
+                sim.log_event(
+                    0, getattr(mod, "MOTHER_QUATERNARY_NAME", "MTSanBarth"),
+                    "SJ_STARTUP_SEED",
+                    f"Seeded from startup: {_sj_st} → {_sj_tgt} "
+                    f"({_sj_bbl:,.0f} bbl | next phase in {_remaining:.1f}h)",
+                    mother=_sj_tgt,
+                )
+
     # ── Mid-sim unavailability: unconditional pass ────────────────────────────
     # The mid-sim dormancy attributes (dormancy_start_hour, _dormancy_end_hour,
     # _dormancy_discharge_first) must be set on vessel objects regardless of
@@ -6311,11 +6359,31 @@ def main():
                 "location":              ms.get("location"),
                 "target_storage":        ms.get("target_storage"),
                 "target_mother":         ms.get("target_mother"),
+                "mto_target_vessel":     ms.get("mto_target_vessel", ""),
+                "is_mto_receiver":       ms.get("is_mto_receiver", False),
+                "nominated_load_bbls":   ms.get("nominated_load_bbls"),
             }
         elif not fleet_df.empty and vn in fleet_df["vessel"].values:
             row = fleet_df[fleet_df["vessel"]==vn].iloc[0]
             vs_dict[vn] = {"status": str(row.get("status","IDLE_A")),
                            "cargo_bbl": _int(row.get("cargo_bbl",0))}
+
+    # ── Include MTSanBarth in vessel_states_json ──────────────────────────────
+    # MTSanBarth is a mother vessel managed via sim.mtsanbarth_status — it is NOT
+    # in ALL_VESSELS (daughter loop). We pass its startup state here so the sim
+    # wrapper can seed sim.mtsanbarth_status / mtsanbarth_target at t=0.
+    _sj_key = getattr(mod, "MOTHER_QUATERNARY_NAME", "MTSanBarth")
+    if _sj_key in manual_states:
+        _sj_ms = manual_states[_sj_key]
+        vs_dict[_sj_key] = {
+            "status":       _sj_ms.get("status", "IDLE_B"),
+            "cargo_bbl":    _sj_ms.get("cargo_bbl", 0),
+            "cargo_api":    _sj_ms.get("cargo_api", 0.0),
+            "target_mother": _sj_ms.get("target_mother"),
+            "location":     _sj_ms.get("location"),
+            "_is_mtsanbarth": True,   # flag so the sim wrapper handles it correctly
+        }
+
     vessel_states_json = json.dumps(vs_dict) if vs_dict else None
 
     # ==========================================================================
