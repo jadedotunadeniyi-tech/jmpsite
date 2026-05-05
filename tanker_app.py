@@ -1851,77 +1851,64 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                         )
 
                     elif _mto_recv_v is not None:
-                        # Case A — active discharger at t=0
-                        # Ensure receiver is flagged
-                        _mto_recv_v._mto_transient_since_day = 0
-                        _mto_recv_v._mto_parcels_received = getattr(
-                            _mto_recv_v, "_mto_parcels_received", 0) + 1
-
-                        _transfer_bbl = v.cargo_bbl
+                        # Case A — active discharger at t=0 (e.g. Balham DISCHARGING → Watson)
+                        #
+                        # Key invariant: v.cargo_bbl IS the remaining volume still to pump.
+                        # Watson's cargo_bbl already includes everything Balham pumped before
+                        # sim start — do NOT re-add to Watson's cargo here.
+                        # already_transferred_bbl is informational only (used for logging).
+                        _transfer_bbl = v.cargo_bbl   # remaining to pump at sim start
+                        _xfr_done     = int(d.get("already_transferred_bbl", 0))
                         _dis_api_val  = sim.vessel_api.get(v.name, 0.0)
-                        _recv_bbl_old = _mto_recv_v.cargo_bbl
-                        _recv_api_old = sim.vessel_api.get(_mto_recv_v.name, 0.0)
                         _mto_rate     = getattr(mod, "VESSEL_DISCHARGE_RATE_BPH",
-                                                {}).get(v.name, 5_000)
-                        _mto_pump_h   = (_transfer_bbl / _mto_rate) if _mto_rate else 12.0
+                                                {}).get(v.name, None)
+                        _mto_disch_h  = getattr(mod, "DISCHARGE_HOURS", 12.0)
+                        _mto_pump_h   = ((_transfer_bbl / _mto_rate) if _mto_rate
+                                         else (_transfer_bbl / 85_000 * _mto_disch_h))
                         _mto_hose_h   = getattr(mod, "HOSE_CONNECTION_HOURS", 2.0)
                         _mto_bert_h   = getattr(mod, "BERTHING_DELAY_HOURS",  0.5)
                         _mto_coff_h   = getattr(mod, "CAST_OFF_HOURS",        0.2)
 
+                        # Flag receiver as active MTO transient.
+                        # parcels_received starts at 0 — Balham completes parcel 1,
+                        # then Rathbone (queued) completes parcel 2 via arrival handler.
+                        _mto_recv_v._mto_transient_since_day = 0
+                        _mto_recv_v._mto_parcels_received    = 0   # Balham not yet counted
+
                         if v.status == "DISCHARGING":
-                            _xfr_done  = int(d.get("already_transferred_bbl", 0))
-                            _remaining = max(0, _transfer_bbl - _xfr_done)
-                            # Receiver already has _xfr_done credited in cargo_bbl from startup
-                            # so we only need to set the remaining on the discharger
-                            v.cargo_bbl       = _remaining
-                            v.next_event_time = (
-                                (_remaining / _mto_rate) if (_mto_rate and _remaining > 0) else _mto_coff_h
-                            )
-                            if _remaining <= 0:
-                                v.status = "CAST_OFF_B"
-                        elif v.status in {"HOSE_CONNECT_B", "BERTHING_B", "WAITING_BERTH_B"}:
-                            # Pre-pump — cargo not yet transferred
-                            v.cargo_bbl = _transfer_bbl
-                            _mto_recv_v.cargo_bbl = _recv_bbl_old   # no transfer yet
-                            sim.vessel_api[_mto_recv_v.name] = _recv_api_old
-                            if v.status == "HOSE_CONNECT_B":
-                                v.next_event_time = _mto_hose_h + _mto_pump_h
-                            else:
-                                v.next_event_time = _mto_bert_h + _mto_hose_h + _mto_pump_h
-                            # Credit full transfer to receiver for the NOMINATED log
-                            _total_recv = _recv_bbl_old + _transfer_bbl
-                            if _total_recv > 0:
-                                sim.vessel_api[_mto_recv_v.name] = (
-                                    (_recv_bbl_old * _recv_api_old
-                                     + _transfer_bbl * _dis_api_val) / _total_recv
-                                )
-                            _mto_recv_v.cargo_bbl = _total_recv
+                            # Mid-pump: pump remaining _transfer_bbl, Watson already correct
+                            v.next_event_time = _mto_pump_h
+                        elif v.status == "HOSE_CONNECT_B":
+                            v.next_event_time = _mto_hose_h + _mto_pump_h
+                        else:  # BERTHING_B / WAITING_BERTH_B
+                            v.next_event_time = _mto_bert_h + _mto_hose_h + _mto_pump_h
 
-                        # Lock transient berth
+                        # Lock the transient berth until Balham casts off.
+                        # Rathbone (SAILING_AB_LEG2) will arrive ~2h later — by then
+                        # the berth is free and the arrival handler routes it to Watson.
                         _mto_lock_until = v.next_event_time + _mto_coff_h
-                        _mto_recv_v._mto_berth_free_at = _mto_lock_until
-                        _mto_recv_v.status          = "WAITING_BERTH_B"
-                        _mto_recv_v.next_event_time = 0.0
+                        _mto_recv_v._mto_berth_free_at  = _mto_lock_until
+                        _mto_recv_v.status              = "WAITING_BERTH_B"
+                        _mto_recv_v.next_event_time     = 0.0
 
-                        # Log MTO_TRANSIENT_NOMINATED on the RECEIVER (Watson) at t=0
-                        # so the Day 1 journey plan column shows the MTO block correctly.
+                        # Log MTO_TRANSIENT_NOMINATED on receiver so Day 1 displays correctly
                         _trn_cap_log = getattr(mod, "MTO_TRANSIENT_CAPACITY_BBL",
                                                {}).get(_mto_recv_v.name,
                                                        _mto_recv_v.cargo_capacity)
                         sim.log_event(
                             0, _mto_recv_v.name, "MTO_TRANSIENT_NOMINATED",
-                            f"[MTO Day 1 — Parcel 1/1] "
-                            f"Received {_transfer_bbl:,.0f} bbl from {v.name} "
+                            f"[MTO Day 1 — Parcel 1 in progress] "
+                            f"Receiving {_transfer_bbl:,.0f} bbl from {v.name} "
+                            f"({_xfr_done:,.0f} bbl already pumped before sim start) "
                             f"@ {_dis_api_val:.2f}° API | on-board: {_mto_recv_v.cargo_bbl:,.0f} bbl "
                             f"(cap {_trn_cap_log:,.0f} bbl) | "
-                            f"berth locked until startup+{_mto_lock_until:.1f}h",
+                            f"berth free after {_mto_lock_until:.1f}h",
                             voyage_num=_mto_recv_v.current_voyage,
                         )
-                        # Log MTO_DISCHARGE_TO_TRANSIENT on the DISCHARGER (Balham)
                         sim.log_event(
                             0, v.name, "MTO_DISCHARGE_TO_TRANSIENT",
-                            f"[MTO Day 1] Startup seed: berthing+hose+pump to {_mto_recv_v.name}: "
-                            f"{_transfer_bbl:,.0f} bbl | status at 08:00: {v.status}",
+                            f"[MTO Day 1] Startup: pumping {_transfer_bbl:,.0f} bbl → {_mto_recv_v.name} "
+                            f"({_mto_pump_h:.1f}h remaining | cast-off at +{_mto_lock_until:.1f}h)",
                             voyage_num=v.current_voyage,
                         )
 

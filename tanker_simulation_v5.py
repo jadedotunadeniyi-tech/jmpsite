@@ -2513,7 +2513,15 @@ class Simulation:
                 existing_transient.name, existing_transient.cargo_capacity)
             _headroom = max(0.0, _trn_cap - existing_transient.cargo_bbl)
 
-            if _parcels_so_far >= MTO_MAX_PARCELS_BEFORE_OFFLOAD or _headroom <= 0:
+            # Check if any vessel is queued specifically for this transient via
+            # _mto_target_vessel (startup-seeded queued discharger, e.g. Rathbone).
+            # If so, suppress the parcel-limit block — the arrival handler will
+            # route the queued vessel directly without going through the auto gate.
+            _has_queued_discharger = any(
+                getattr(vv, "_mto_target_vessel", None) == existing_transient.name
+                for vv in self.vessels
+            )
+            if (_parcels_so_far >= MTO_MAX_PARCELS_BEFORE_OFFLOAD or _headroom <= 0) and not _has_queued_discharger:
                 self.log_event(
                     t, existing_transient.name, "MTO_PARCEL_LIMIT_REACHED",
                     f"[MTO Day {day_key+1}] No further top-ups — "
@@ -2522,6 +2530,9 @@ class Simulation:
                     f"awaiting opportunistic mother berth",
                     voyage_num=existing_transient.current_voyage,
                 )
+                return
+            elif (_parcels_so_far >= MTO_MAX_PARCELS_BEFORE_OFFLOAD or _headroom <= 0) and _has_queued_discharger:
+                # Queued discharger will arrive and use the arrival handler — skip auto gate
                 return
 
             remaining = [vv for vv in waiters if vv is not existing_transient]
@@ -5124,6 +5135,16 @@ class Simulation:
                                     v.status          = "CAST_OFF_B"
                                     v.next_event_time = _end_t
                                     v._mto_target_vessel = None  # clear flag
+
+                                    # Increment parcel counter on receiver
+                                    _recv_v._mto_parcels_received = getattr(
+                                        _recv_v, "_mto_parcels_received", 0) + 1
+
+                                    # After this discharge the receiver's transient
+                                    # role is complete — clear flag so the auto MTO
+                                    # gate no longer sees it as an active transient,
+                                    # preventing duplicate Day 2 nominations.
+                                    _recv_v._mto_transient_since_day = None
 
                                     _recv_v.status          = "WAITING_BERTH_B"
                                     _recv_v.next_event_time = self.next_daylight_hourly_berth_check(
