@@ -5788,8 +5788,10 @@ def main():
             ]):
                 with sv[j]:
                     _default_vol = int(cv * init_pct)
+                    _sv_key = f"sv_{sn}"
+                    _sv_val = st.session_state.get(_sv_key, _default_vol)
                     _entered = st.number_input(
-                        sn, 0, cv * 2, _default_vol, step=5_000, key=f"sv_{sn}",
+                        sn, 0, cv * 2, _sv_val, step=5_000, key=_sv_key,
                         help=f"Capacity: {cv:,} bbl. Default: {_default_vol:,} bbl (80%). Values above capacity are treated as pre-existing overflow.")
                     manual_storage[sn] = _entered
                     if _entered > cv:
@@ -5803,9 +5805,12 @@ def main():
             for j,mn in enumerate(["Bryanston","GreenEagle","MTSanBarth"]):
                 with mv[j]:
                     _mother_cap_ui = int(MOTHER_CAP_BY_NAME.get(mn, mod.MOTHER_CAPACITY_BBL))
+                    _mv_key = f"mv_{mn}"
+                    _mv_default = _mother_vol_defaults.get(mn, 0)
+                    _mv_val = st.session_state.get(_mv_key, _mv_default)
                     _mv_entered = st.number_input(
-                        mn, 0, _mother_cap_ui * 2, _mother_vol_defaults.get(mn, 0),
-                        step=10_000, key=f"mv_{mn}",
+                        mn, 0, _mother_cap_ui * 2, _mv_val,
+                        step=10_000, key=_mv_key,
                         help=f"Capacity: {_mother_cap_ui:,} bbl. Values above capacity are treated as excess load.")
                     manual_mother[mn.lower()] = _mv_entered
                     if _mv_entered > _mother_cap_ui:
@@ -6861,8 +6866,8 @@ def main():
     if _sj_tl_st and _sj_tl_st not in (None, "IDLE_B", "nan"):
         _sj_log_ev = log_df[(log_df["Vessel"] == "MTSanBarth") &
                              (log_df["Event"] == "SJ_TRANSLOAD_START")]
-        _sj_disch_ev = _d1_log[(log_df["Vessel"] == "MTSanBarth") &
-                                (log_df["Event"] == "DISCHARGE_START")] if not _d1_log.empty else pd.DataFrame()
+        _sj_disch_ev = _d1_log[(_d1_log["Vessel"] == "MTSanBarth") &
+                                (_d1_log["Event"] == "DISCHARGE_START")] if not _d1_log.empty else pd.DataFrame()
         _sj_mother = "?"
         _sj_cargo  = 0
         if not _sj_log_ev.empty:
@@ -8988,7 +8993,7 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
 
                 _tide_display_df = _tide_df.drop(columns=["Declared Tides"]).reset_index(drop=True)
                 _tide_display = _tide_display_df.style.apply(_tide_row_color, axis=1)
-                st.dataframe(_tide_display, hide_index=True, use_container_width=True)
+                st.dataframe(_tide_display, hide_index=True, width="stretch")
 
                 # ── Intraday chart for selected day ──────────────────────────
                 st.markdown("**📈 Intraday tidal profile — select a day to inspect:**")
@@ -9056,7 +9061,7 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                         legend=dict(bgcolor="rgba(0,0,0,0)", font_size=10),
                         showlegend=True,
                     )
-                    st.plotly_chart(_fig_t, use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(_fig_t, width="stretch", config={"displayModeBar": False})
                     # Summary for selected day
                     _sel_row = _daily_rows[_sel_day_idx]
                     _cwin_txt = _sel_row["Declared Daylight Tides (>1.6m)"]
