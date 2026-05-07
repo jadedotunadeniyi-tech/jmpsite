@@ -5000,11 +5000,14 @@ def main():
                         break
 
                 # Target mother from Discharge @ BIA columns
-                # Positive value = this vessel discharging INTO that mother
+                # A non-zero value (positive OR negative) in the daughter row means
+                # this vessel is actively discharging INTO that mother.
+                # Negative values arise when the CSV records the transfer as a
+                # debit on the daughter side (e.g. Watson col-18 = -80,598 → GreenEagle).
                 _mom = ""
                 for _c, _mn in _MOM_COLS.items():
                     v = _num(rows, _r, _c)
-                    if v > 0:   # positive = discharging into this mother
+                    if v != 0:   # non-zero (pos or neg) = discharging into this mother
                         _mom = _mn
                         break
 
