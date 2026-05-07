@@ -5789,9 +5789,13 @@ def main():
                 with sv[j]:
                     _default_vol = int(cv * init_pct)
                     _sv_key = f"sv_{sn}"
-                    _sv_val = st.session_state.get(_sv_key, _default_vol)
+                    # Initialise session state ONCE (first run, no CSV import).
+                    # After this, Streamlit owns the value — do NOT pass value= to
+                    # number_input, otherwise Streamlit 1.57 warns about the conflict.
+                    if _sv_key not in st.session_state:
+                        st.session_state[_sv_key] = _default_vol
                     _entered = st.number_input(
-                        sn, 0, cv * 2, _sv_val, step=5_000, key=_sv_key,
+                        sn, 0, cv * 2, step=5_000, key=_sv_key,
                         help=f"Capacity: {cv:,} bbl. Default: {_default_vol:,} bbl (80%). Values above capacity are treated as pre-existing overflow.")
                     manual_storage[sn] = _entered
                     if _entered > cv:
@@ -5807,9 +5811,12 @@ def main():
                     _mother_cap_ui = int(MOTHER_CAP_BY_NAME.get(mn, mod.MOTHER_CAPACITY_BBL))
                     _mv_key = f"mv_{mn}"
                     _mv_default = _mother_vol_defaults.get(mn, 0)
-                    _mv_val = st.session_state.get(_mv_key, _mv_default)
+                    # Initialise session state ONCE (first run, no CSV import).
+                    # Do NOT pass value= to number_input — avoids Streamlit 1.57 conflict warning.
+                    if _mv_key not in st.session_state:
+                        st.session_state[_mv_key] = _mv_default
                     _mv_entered = st.number_input(
-                        mn, 0, _mother_cap_ui * 2, _mv_val,
+                        mn, 0, _mother_cap_ui * 2,
                         step=10_000, key=_mv_key,
                         help=f"Capacity: {_mother_cap_ui:,} bbl. Values above capacity are treated as excess load.")
                     manual_mother[mn.lower()] = _mv_entered
