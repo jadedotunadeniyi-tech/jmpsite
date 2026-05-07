@@ -454,6 +454,32 @@ LOAD_HOURS             = 12
 DISCHARGE_HOURS        = 12
 CAST_OFF_HOURS         = 0.2
 BERTHING_DELAY_HOURS   = 0.5
+
+def _berth_free_at(pump_end_sim_hour: float) -> float:
+    """Return the sim-hour at which the mother berth is truly free after a discharge.
+
+    A vessel is physically alongside the mother until cast-off completes.
+    Cast-off is constrained to the window [CAST_OFF_START, CAST_OFF_END) wall-clock.
+    When pumping finishes after CAST_OFF_END (e.g. 23:56) the vessel cannot cast
+    off until the next morning at CAST_OFF_START (06:00), so the berth remains
+    occupied overnight — locking out any other vessel until then.
+
+    Using a flat ``+ CAST_OFF_HOURS`` incorrectly frees the berth at pump_end + 0.2h
+    regardless of whether the nighttime restriction delays cast-off by 6-12 hours.
+    """
+    wall_at_pump_end = (pump_end_sim_hour + SIM_HOUR_OFFSET) % 24
+    if CAST_OFF_START <= wall_at_pump_end < CAST_OFF_END:
+        # Pump ends inside cast-off window — cast off immediately
+        cast_off_t = pump_end_sim_hour
+    else:
+        # Pump ends outside cast-off window — roll forward to next window open
+        days_elapsed = int(pump_end_sim_hour // 24)
+        sim_co_today = days_elapsed * 24 + (CAST_OFF_START - SIM_HOUR_OFFSET)
+        if pump_end_sim_hour <= sim_co_today:
+            cast_off_t = sim_co_today
+        else:
+            cast_off_t = sim_co_today + 24  # next calendar day
+    return cast_off_t + CAST_OFF_HOURS
 POST_BERTHING_START_GAP_HOURS         = 0.5
 POST_MOTHER_BERTHING_START_GAP_HOURS  = 1.0
 
@@ -1332,14 +1358,16 @@ class Simulation:
             if vv.status == "BERTHING_B":
                 _disch_rate_init = VESSEL_DISCHARGE_RATE_BPH.get(vv.name)
                 _disch_hrs_init = (vv.cargo_bbl / _disch_rate_init) if _disch_rate_init else DISCHARGE_HOURS
-                _end = BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS + _disch_hrs_init + CAST_OFF_HOURS
+                _pump_end_init   = BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS + _disch_hrs_init
+                _end = _berth_free_at(_pump_end_init)   # accounts for nighttime cast-off delay
             elif vv.status == "HOSE_CONNECT_B":
                 _disch_rate_init = VESSEL_DISCHARGE_RATE_BPH.get(vv.name)
                 _disch_hrs_init = (vv.cargo_bbl / _disch_rate_init) if _disch_rate_init else DISCHARGE_HOURS
-                _end = HOSE_CONNECTION_HOURS + _disch_hrs_init + CAST_OFF_HOURS
+                _end = _berth_free_at(HOSE_CONNECTION_HOURS + _disch_hrs_init)
             elif vv.status == "DISCHARGING":
                 _disch_rate_init = VESSEL_DISCHARGE_RATE_BPH.get(vv.name)
-                _end = ((vv.cargo_bbl / _disch_rate_init) if _disch_rate_init else DISCHARGE_HOURS) + CAST_OFF_HOURS
+                _disch_hrs_init  = (vv.cargo_bbl / _disch_rate_init) if _disch_rate_init else DISCHARGE_HOURS
+                _end = _berth_free_at(_disch_hrs_init)
             else:
                 continue
             self.mother_berth_free_at[mother_name] = max(self.mother_berth_free_at[mother_name], _end)
@@ -2840,8 +2868,8 @@ class Simulation:
             _zz.assigned_mother = _best_mother
             _zz_rate = VESSEL_DISCHARGE_RATE_BPH.get("ZeeZee", ThirdPartyVessel.DISCHARGE_RATE_BPH)
             _discharge_hrs = _zz.cargo_bbl / _zz_rate
-            _discharge_end = (_best_start + BERTHING_DELAY_HOURS
-                              + HOSE_CONNECTION_HOURS + _discharge_hrs + CAST_OFF_HOURS)
+            _pump_end_zz   = _best_start + BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS + _discharge_hrs
+            _discharge_end = _berth_free_at(_pump_end_zz)
             self.mother_berth_free_at[_best_mother] = max(
                 self.mother_berth_free_at[_best_mother], _discharge_end)
             _zz.status = "BERTHING_B"
@@ -2889,7 +2917,7 @@ class Simulation:
             _discharge_hrs = _zz.cargo_bbl / _zz_rate
             _zz.status = "DISCHARGING"
             self.mother_berth_free_at[_mn] = max(
-                self.mother_berth_free_at[_mn], t + _discharge_hrs + CAST_OFF_HOURS)
+                self.mother_berth_free_at[_mn], _berth_free_at(t + _discharge_hrs))
             _zz.next_event_time = t + _discharge_hrs
             self.log_event(
                 t, "ZeeZee", "DISCHARGE_START",
@@ -3241,11 +3269,12 @@ class Simulation:
                                f"ready at {self.hours_to_dt(self.mtsanbarth_fender_ready_t).strftime('%H:%M')}",
                                mother=target)
 
-            # Reserve berth for full cycle: berthing + hose + pump + cast-off
-            # (fender prep is already baked into berth_start via _fender_earliest)
+            # Reserve berth for full cycle: berthing + hose + pump + cast-off.
+            # Use _berth_free_at to account for nighttime cast-off restriction —
+            # if pumping ends after CAST_OFF_END the berth stays locked overnight.
             pump_hours  = amount / MTSANBARTH_TRANSLOAD_RATE_BPH
-            _full_cycle = (BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS
-                           + pump_hours + CAST_OFF_HOURS)
+            _sj_pump_end = berth_start + BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS + pump_hours
+            _full_cycle  = _berth_free_at(_sj_pump_end) - berth_start
             self.mother_berth_free_at[target] = max(
                 self.mother_berth_free_at.get(target, 0.0),
                 berth_start + _full_cycle,
@@ -5212,10 +5241,8 @@ class Simulation:
                             v.status = "BERTHING_B"
                             _disch_rate_3 = VESSEL_DISCHARGE_RATE_BPH.get(v.name)
                             _disch_hrs_3 = (v.cargo_bbl / _disch_rate_3) if _disch_rate_3 else DISCHARGE_HOURS
-                            _discharge_end = (
-                                start + BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS
-                                + _disch_hrs_3 + CAST_OFF_HOURS
-                            )
+                            _pump_end_3   = start + BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS + _disch_hrs_3
+                            _discharge_end = _berth_free_at(_pump_end_3)
                             self.mother_berth_free_at[selected_mother] = max(
                                 self.mother_berth_free_at[selected_mother], _discharge_end
                             )
@@ -5293,10 +5320,9 @@ class Simulation:
                             v.assigned_mother = _mto_best_mother
                             _disch_rate_mto = VESSEL_DISCHARGE_RATE_BPH.get(v.name)
                             _disch_hrs_mto  = (v.cargo_bbl / _disch_rate_mto) if _disch_rate_mto else DISCHARGE_HOURS
-                            _discharge_end_mto = (
-                                _mto_best_start + BERTHING_DELAY_HOURS
-                                + HOSE_CONNECTION_HOURS + _disch_hrs_mto + CAST_OFF_HOURS
-                            )
+                            _pump_end_mto   = (_mto_best_start + BERTHING_DELAY_HOURS
+                                               + HOSE_CONNECTION_HOURS + _disch_hrs_mto)
+                            _discharge_end_mto = _berth_free_at(_pump_end_mto)
                             self.mother_berth_free_at[_mto_best_mother] = max(
                                 self.mother_berth_free_at[_mto_best_mother],
                                 _discharge_end_mto,
@@ -5476,10 +5502,8 @@ class Simulation:
                     v.status = "BERTHING_B"
                     _disch_rate_4 = VESSEL_DISCHARGE_RATE_BPH.get(v.name)
                     _disch_hrs_4 = (v.cargo_bbl / _disch_rate_4) if _disch_rate_4 else DISCHARGE_HOURS
-                    _discharge_end = (
-                        start + BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS
-                        + _disch_hrs_4 + CAST_OFF_HOURS
-                    )
+                    _pump_end_4   = start + BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS + _disch_hrs_4
+                    _discharge_end = _berth_free_at(_pump_end_4)
                     self.mother_berth_free_at[selected_mother] = max(
                         self.mother_berth_free_at[selected_mother], _discharge_end
                     )
@@ -5604,10 +5628,9 @@ class Simulation:
                     # worst-case: pump-end + maximum cast-off wait + CAST_OFF_HOURS.
                     # The real cast-off time is resolved in the DISCHARGING handler once
                     # pumping finishes and will update mother_berth_free_at if needed.
-                    _cast_off_worst = self.next_cast_off_window(t + _disch_hrs)
                     self.mother_berth_free_at[selected_mother] = max(
                         self.mother_berth_free_at[selected_mother],
-                        _cast_off_worst + CAST_OFF_HOURS,
+                        _berth_free_at(t + _disch_hrs),
                     )
                     v.next_event_time = t + _disch_hrs
                     # MTO transient offload: stamp "A" suffix on VoyageCode
@@ -5694,7 +5717,7 @@ class Simulation:
                     # conservative estimate set at HOSE_CONNECT_B / WAITING_BERTH_B.
                     self.mother_berth_free_at[selected_mother] = max(
                         self.mother_berth_free_at[selected_mother],
-                        cast_off_b_t + CAST_OFF_HOURS,
+                        _berth_free_at(t),  # t = pump complete; cast_off_b_t already computed
                     )
                     v.status = "CAST_OFF_B"
                     v.next_event_time = cast_off_b_t + CAST_OFF_HOURS
