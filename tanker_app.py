@@ -5995,9 +5995,12 @@ def main():
                         else _cargo_cap if ("Discharging" in _sel_stat or "Loading" in _sel_stat)
                         else 0
                     )
+                    _vc_key = f"vc_{vn}"
+                    if _vc_key not in st.session_state:
+                        st.session_state[_vc_key] = _cargo_default
                     cg = st.number_input(
-                        "Cargo", 0, _cargo_cap * 2, _cargo_default,
-                        step=1_000, key=f"vc_{vn}",
+                        "Cargo", 0, _cargo_cap * 2,
+                        step=1_000, key=_vc_key,
                         label_visibility="collapsed",
                         help=(
                             f"Current cargo on board at 08:00. "
@@ -6016,14 +6019,28 @@ def main():
                 _nominated_load_bbl = None
                 if _is_loading_status:
                     with rc[3]:
-                        _nom_default = _cargo_cap  # default = full capacity
+                        # min_value must not exceed value — when cargo already overflows
+                        # capacity (cg > _cargo_cap), clamp min to 0 to avoid
+                        # StreamlitValueBelowMinError: value(_cargo_cap) < min_value(cg).
+                        _nom_min     = min(cg, _cargo_cap)
+                        _nom_default = max(_cargo_cap, cg)  # nominated load >= current cargo
+                        _vnom_key    = f"vnom_{vn}"
+                        # Initialise session state only on first render — do NOT pass
+                        # value= when key is already in session_state (avoids Streamlit
+                        # 1.57 conflict warning that triggers rerun loops).
+                        if _vnom_key not in st.session_state:
+                            st.session_state[_vnom_key] = _nom_default
+                        else:
+                            # Clamp stored value to valid range in case cargo changed
+                            _stored = st.session_state[_vnom_key]
+                            if _stored < _nom_min:
+                                st.session_state[_vnom_key] = _nom_default
                         _nominated_load_bbl = st.number_input(
                             "Nom. load (bbl)",
-                            min_value=cg,
+                            min_value=_nom_min,
                             max_value=_cargo_cap * 2,
-                            value=_nom_default,
                             step=1_000,
-                            key=f"vnom_{vn}",
+                            key=_vnom_key,
                             help=(
                                 "**Nominated load volume** — the total cargo this vessel should "
                                 "load on startup day before departing. The sim will stop loading "
