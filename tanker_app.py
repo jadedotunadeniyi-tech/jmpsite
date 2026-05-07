@@ -1516,6 +1516,29 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                 _vr_start     = str(_vr.get("start_date", "")).strip()   # dormancy start date
                 _vr_storage   = str(_vr.get("storage", "")).strip()
                 _vr_indef     = bool(_vr.get("indefinite", False))
+
+                # Defensive sanitiser: if the stored string looks like a Python repr of
+                # a date tuple — e.g. "(datetime.date(2026, 5, 8),)" — extract the ISO
+                # date from it so fromisoformat() doesn't crash.  This can happen when
+                # a partial date range (only start selected) was saved before the fix.
+                import re as _re_vr
+                def _sanitise_date_str(s):
+                    if not s or s in ("indefinite", ""):
+                        return s
+                    # Already a clean ISO date string?
+                    try:
+                        import datetime as _dt_chk
+                        _dt_chk.date.fromisoformat(s)
+                        return s   # already valid
+                    except ValueError:
+                        pass
+                    # Try to extract YYYY-MM-DD from a repr like "(datetime.date(2026, 5, 8),)"
+                    _m = _re_vr.search(r"datetime\.date\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2})\)", s)
+                    if _m:
+                        return f"{int(_m.group(1)):04d}-{int(_m.group(2)):02d}-{int(_m.group(3)):02d}"
+                    return s   # return as-is; fromisoformat will raise and be caught below
+                _vr_date  = _sanitise_date_str(_vr_date)
+                _vr_start = _sanitise_date_str(_vr_start)
                 if _vr_name not in _known_vessels_vr or _vr_storage not in _valid_storages_vr:
                     continue
                 if _vr_indef or _vr_date == "indefinite":
@@ -4835,11 +4858,25 @@ def main():
                             "It resumes loading at 08:00 on the **end date**."
                         ),
                     )
-                    # date_input returns a tuple (start, end) for range or a single date
-                    if isinstance(_vr_range, (list, tuple)) and len(_vr_range) == 2:
-                        _vr_start_date, _vr_end_date = _vr_range
+                    # date_input in range mode may return:
+                    #   (date, date) — both ends chosen (normal)
+                    #   (date,)      — only start chosen (user still selecting end)
+                    #   date         — non-range single date
+                    # Always extract raw datetime.date objects before calling .isoformat()
+                    # so we never store the repr() of the tuple as a string.
+                    if isinstance(_vr_range, (list, tuple)):
+                        if len(_vr_range) >= 2:
+                            _vr_start_date = _vr_range[0]
+                            _vr_end_date   = _vr_range[1]
+                        elif len(_vr_range) == 1:
+                            # Partial selection — only start picked, end not yet chosen.
+                            # Hold off storing until both ends are selected.
+                            _vr_start_date = _vr_range[0]
+                            _vr_end_date   = None   # signals incomplete range
+                        else:
+                            _vr_start_date = _vr_end_date = None
                     else:
-                        # Single date picked — treat as same start/end
+                        # Single date object — treat as same start/end
                         _vr_start_date = _vr_end_date = _vr_range
                 else:
                     _vr_start_date = _vr_end_date = None
@@ -4858,11 +4895,32 @@ def main():
                             "storage":      _vr_storage,
                             "indefinite":   True,
                         }
+                    elif _vr_end_date is None:
+                        # Incomplete date range — user only picked the start date.
+                        # Show a warning and do not save to avoid storing an
+                        # unparseable repr string like "(datetime.date(2026, 5, 8),)".
+                        st.warning(
+                            "⚠️ Please select both the **start** and **end** dates "
+                            "of the unavailability window before clicking Set.",
+                            icon="📅",
+                        )
                     else:
+                        # Always use .isoformat() on the raw date objects — never str()
+                        # on a tuple, which would produce an unparseable repr string.
+                        _vr_start_iso = (
+                            _vr_start_date.isoformat()
+                            if hasattr(_vr_start_date, "isoformat")
+                            else str(_vr_start_date)
+                        )
+                        _vr_end_iso = (
+                            _vr_end_date.isoformat()
+                            if hasattr(_vr_end_date, "isoformat")
+                            else str(_vr_end_date)
+                        )
                         _vr_dict[_vr_vessel] = {
                             "name":         _vr_vessel,
-                            "start_date":   str(_vr_start_date),
-                            "date":         str(_vr_end_date),   # resumption date → backend
+                            "start_date":   _vr_start_iso,
+                            "date":         _vr_end_iso,   # resumption date → backend
                             "storage":      _vr_storage,
                             "indefinite":   False,
                         }
