@@ -330,8 +330,6 @@ PGM_LOAD_RATE_BPH         = 440   # PGM (Point G) — pump rate; SantaMonica loa
 #  Operation         Rate (bph)   Notes
 # ─────────────────────────────────────────────────────────────────────────────
 EXPORT_RATE_BPH            = 20_000   # Mother vessel export pump rate
-MTSANBARTH_TRANSLOAD_RATE_BPH = VESSEL_DISCHARGE_RATE_BPH.get(
-    "MTSanBarth", 12_000)  # MTSanBarth → primary mother transfer rate (config-driven)
 
 # Per-vessel discharge rates (bbl/hr) at Point B.
 # Vessels absent from this dict use DISCHARGE_HOURS (fixed 12-hour default).
@@ -341,6 +339,10 @@ VESSEL_DISCHARGE_RATE_BPH: dict = {
     "ZeeZee":      7_000,   # 7,000 bph — operator-specified discharge rate
     "MTSanBarth":  12_000,  # 12,000 bph — operator-specified transload rate to primary mother
 }
+# Derived from VESSEL_DISCHARGE_RATE_BPH so both constants stay in sync.
+# Must be defined AFTER VESSEL_DISCHARGE_RATE_BPH.
+MTSANBARTH_TRANSLOAD_RATE_BPH = VESSEL_DISCHARGE_RATE_BPH.get(
+    "MTSanBarth", 12_000)  # MTSanBarth → primary mother transfer rate (config-driven)
 
 # ── SECTION H: POINT A LOAD CAP ──────────────────────────────────────────────
 POINT_A_LOAD_CAP_BBL = 63_000   # Max load at Point A for POINT_A_LOAD_CAP_VESSELS
