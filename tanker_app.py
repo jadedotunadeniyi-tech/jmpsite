@@ -992,6 +992,46 @@ LOCATION_CATALOGUE = [
         ("IDLE_B",           "⚓ MTO receiver — idle at BIA, awaiting discharger"),
         ("WAITING_BERTH_B",  "⏳ MTO receiver — waiting for discharger to berth"),
     ]},
+    {"display": "MTO — Balham (BIA)",       "sim_value": "Balham",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_receiver": True,
+     "statuses": [
+        ("PF_SWAP",          "📦 MTO receiver — accumulating cargo from discharger(s)"),
+        ("IDLE_B",           "⚓ MTO receiver — idle at BIA, awaiting discharger"),
+        ("WAITING_BERTH_B",  "⏳ MTO receiver — waiting for discharger to berth"),
+    ]},
+    {"display": "MTO — Bedford (BIA)",      "sim_value": "Bedford",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_receiver": True,
+     "statuses": [
+        ("PF_SWAP",          "📦 MTO receiver — accumulating cargo from discharger(s)"),
+        ("IDLE_B",           "⚓ MTO receiver — idle at BIA, awaiting discharger"),
+        ("WAITING_BERTH_B",  "⏳ MTO receiver — waiting for discharger to berth"),
+    ]},
+    {"display": "MTO — Woodstock (BIA)",    "sim_value": "Woodstock",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_receiver": True,
+     "statuses": [
+        ("PF_SWAP",          "📦 MTO receiver — accumulating cargo from discharger(s)"),
+        ("IDLE_B",           "⚓ MTO receiver — idle at BIA, awaiting discharger"),
+        ("WAITING_BERTH_B",  "⏳ MTO receiver — waiting for discharger to berth"),
+    ]},
+    {"display": "MTO — Bagshot (BIA)",      "sim_value": "Bagshot",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_receiver": True,
+     "statuses": [
+        ("PF_SWAP",          "📦 MTO receiver — accumulating cargo from discharger(s)"),
+        ("IDLE_B",           "⚓ MTO receiver — idle at BIA, awaiting discharger"),
+        ("WAITING_BERTH_B",  "⏳ MTO receiver — waiting for discharger to berth"),
+    ]},
+    {"display": "MTO — Amyla (BIA)",        "sim_value": "Amyla",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_receiver": True,
+     "statuses": [
+        ("PF_SWAP",          "📦 MTO receiver — accumulating cargo from discharger(s)"),
+        ("IDLE_B",           "⚓ MTO receiver — idle at BIA, awaiting discharger"),
+        ("WAITING_BERTH_B",  "⏳ MTO receiver — waiting for discharger to berth"),
+    ]},
     # MTO discharger entries — vessel discharging INTO the MTO receiver shuttle
     {"display": "MTO — Discharging to Watson",    "sim_value": "Watson",
      "field_zone": "BIA", "target_mother": None, "target_storage": None,
@@ -1032,6 +1072,56 @@ LOCATION_CATALOGUE = [
         ("BERTHING_B",       "🔗 MTO discharge — berthing alongside Rathbone"),
         ("WAITING_BERTH_B",  "⏳ MTO discharge — waiting to berth alongside Rathbone"),
         ("CAST_OFF_B",       "↩️ MTO discharge — complete, casting off from Rathbone"),
+    ]},
+    {"display": "MTO — Discharging to Balham",   "sim_value": "Balham",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Balham",
+     "statuses": [
+        ("DISCHARGING",      "⬇️ MTO discharge — pumping cargo to Balham"),
+        ("HOSE_CONNECT_B",   "🔧 MTO discharge — hose connection to Balham"),
+        ("BERTHING_B",       "🔗 MTO discharge — berthing alongside Balham"),
+        ("WAITING_BERTH_B",  "⏳ MTO discharge — waiting to berth alongside Balham"),
+        ("CAST_OFF_B",       "↩️ MTO discharge — complete, casting off from Balham"),
+    ]},
+    {"display": "MTO — Discharging to Bedford",  "sim_value": "Bedford",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Bedford",
+     "statuses": [
+        ("DISCHARGING",      "⬇️ MTO discharge — pumping cargo to Bedford"),
+        ("HOSE_CONNECT_B",   "🔧 MTO discharge — hose connection to Bedford"),
+        ("BERTHING_B",       "🔗 MTO discharge — berthing alongside Bedford"),
+        ("WAITING_BERTH_B",  "⏳ MTO discharge — waiting to berth alongside Bedford"),
+        ("CAST_OFF_B",       "↩️ MTO discharge — complete, casting off from Bedford"),
+    ]},
+    {"display": "MTO — Discharging to Woodstock", "sim_value": "Woodstock",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Woodstock",
+     "statuses": [
+        ("DISCHARGING",      "⬇️ MTO discharge — pumping cargo to Woodstock"),
+        ("HOSE_CONNECT_B",   "🔧 MTO discharge — hose connection to Woodstock"),
+        ("BERTHING_B",       "🔗 MTO discharge — berthing alongside Woodstock"),
+        ("WAITING_BERTH_B",  "⏳ MTO discharge — waiting to berth alongside Woodstock"),
+        ("CAST_OFF_B",       "↩️ MTO discharge — complete, casting off from Woodstock"),
+    ]},
+    {"display": "MTO — Discharging to Bagshot",  "sim_value": "Bagshot",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Bagshot",
+     "statuses": [
+        ("DISCHARGING",      "⬇️ MTO discharge — pumping cargo to Bagshot"),
+        ("HOSE_CONNECT_B",   "🔧 MTO discharge — hose connection to Bagshot"),
+        ("BERTHING_B",       "🔗 MTO discharge — berthing alongside Bagshot"),
+        ("WAITING_BERTH_B",  "⏳ MTO discharge — waiting to berth alongside Bagshot"),
+        ("CAST_OFF_B",       "↩️ MTO discharge — complete, casting off from Bagshot"),
+    ]},
+    {"display": "MTO — Discharging to Amyla",    "sim_value": "Amyla",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Amyla",
+     "statuses": [
+        ("DISCHARGING",      "⬇️ MTO discharge — pumping cargo to Amyla"),
+        ("HOSE_CONNECT_B",   "🔧 MTO discharge — hose connection to Amyla"),
+        ("BERTHING_B",       "🔗 MTO discharge — berthing alongside Amyla"),
+        ("WAITING_BERTH_B",  "⏳ MTO discharge — waiting to berth alongside Amyla"),
+        ("CAST_OFF_B",       "↩️ MTO discharge — complete, casting off from Amyla"),
     ]},
     # ── Returning from BIA — one entry per storage destination ──────────────
     # Chapel and JasmineS are both point A: sim picks between them by stock level
@@ -1785,16 +1875,32 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                     _raw_cargo = int(d["cargo_bbl"])
                     _vcap      = v.cargo_capacity
                     _over      = max(0, _raw_cargo - _vcap)
-                    v.cargo_bbl = min(_raw_cargo, _vcap)
-                    if _over > 0:
-                        # Credit excess cargo as pre-existing spill (no specific
-                        # storage attribution — use a vessel-level overflow key)
-                        _vspill_key = f"vessel_{v.name}"
-                        sim.storage_overflow_bbl[_vspill_key] = (
-                            sim.storage_overflow_bbl.get(_vspill_key, 0.0) + _over
-                        )
-                        sim.storage_overflow_events += 1
-                        sim.total_spilled           += _over
+                    # MTO receiver vessels may legitimately carry cargo above their
+                    # normal capacity (they act as temporary floating storage).
+                    # Their MTO_TRANSIENT_CAPACITY_BBL governs the real ceiling.
+                    # Do NOT clamp or spill their cargo — keep the full volume on
+                    # the vessel so the MTO discharge math is correct.
+                    _is_mto_recv_vessel = d.get("is_mto_receiver", False)
+                    _mto_cap = getattr(mod, "MTO_TRANSIENT_CAPACITY_BBL", {}).get(
+                        v.name, v.cargo_capacity)
+                    if _is_mto_recv_vessel and _raw_cargo <= _mto_cap:
+                        # Within MTO capacity — accept full volume, no spill
+                        v.cargo_bbl = _raw_cargo
+                    elif _is_mto_recv_vessel and _raw_cargo > _mto_cap:
+                        # Over MTO cap — clamp to MTO cap (still no spill accounting)
+                        v.cargo_bbl = _mto_cap
+                    else:
+                        # Normal vessel: clamp to cargo_capacity and spill excess
+                        v.cargo_bbl = min(_raw_cargo, _vcap)
+                        if _over > 0:
+                            # Credit excess cargo as pre-existing spill (no specific
+                            # storage attribution — use a vessel-level overflow key)
+                            _vspill_key = f"vessel_{v.name}"
+                            sim.storage_overflow_bbl[_vspill_key] = (
+                                sim.storage_overflow_bbl.get(_vspill_key, 0.0) + _over
+                            )
+                            sim.storage_overflow_events += 1
+                            sim.total_spilled           += _over
                 # Seed current storage for vessels already at a storage location
                 _loc = d.get("location")
                 if _loc and _loc in _sp_map:

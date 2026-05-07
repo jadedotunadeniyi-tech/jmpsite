@@ -330,13 +330,16 @@ PGM_LOAD_RATE_BPH         = 440   # PGM (Point G) — pump rate; SantaMonica loa
 #  Operation         Rate (bph)   Notes
 # ─────────────────────────────────────────────────────────────────────────────
 EXPORT_RATE_BPH            = 20_000   # Mother vessel export pump rate
-MTSANBARTH_TRANSLOAD_RATE_BPH = 10_000 # MTSanBarth → primary mother transfer rate
+MTSANBARTH_TRANSLOAD_RATE_BPH = VESSEL_DISCHARGE_RATE_BPH.get(
+    "MTSanBarth", 12_000)  # MTSanBarth → primary mother transfer rate (config-driven)
 
 # Per-vessel discharge rates (bbl/hr) at Point B.
 # Vessels absent from this dict use DISCHARGE_HOURS (fixed 12-hour default).
 # When present, discharge duration = cargo_bbl / rate (dynamic).
 VESSEL_DISCHARGE_RATE_BPH: dict = {
     "SantaMonica": 2_500,   # 2,500 bph → 28,000 bbl discharges in ~11.2 h
+    "ZeeZee":      7_000,   # 7,000 bph — operator-specified discharge rate
+    "MTSanBarth":  12_000,  # 12,000 bph — operator-specified transload rate to primary mother
 }
 
 # ── SECTION H: POINT A LOAD CAP ──────────────────────────────────────────────
@@ -974,7 +977,7 @@ class ThirdPartyVessel:
       WAITING_B → BERTHING_B → HOSE_CONNECT_B → DISCHARGING → CAST_OFF_B → None
     """
 
-    DISCHARGE_RATE_BPH = 20_000   # pump rate while discharging to mother
+    DISCHARGE_RATE_BPH = 20_000   # fallback only — overridden by VESSEL_DISCHARGE_RATE_BPH["ZeeZee"]
 
     def __init__(self, volume_bbl: float, api: float, arrival_t: float):
         self.name            = "ZeeZee"
@@ -2822,7 +2825,8 @@ class Simulation:
             # ── Berth secured: proceed to BERTHING_B ─────────────────────────
             _zz.daughter_block_since = None
             _zz.assigned_mother = _best_mother
-            _discharge_hrs = _zz.cargo_bbl / ThirdPartyVessel.DISCHARGE_RATE_BPH
+            _zz_rate = VESSEL_DISCHARGE_RATE_BPH.get("ZeeZee", ThirdPartyVessel.DISCHARGE_RATE_BPH)
+            _discharge_hrs = _zz.cargo_bbl / _zz_rate
             _discharge_end = (_best_start + BERTHING_DELAY_HOURS
                               + HOSE_CONNECTION_HOURS + _discharge_hrs)
             self.mother_berth_free_at[_best_mother] = max(
@@ -2868,7 +2872,8 @@ class Simulation:
             )
             self.mother_bbl[_mn] += _zz.cargo_bbl
             self.total_loaded    += _zz.cargo_bbl
-            _discharge_hrs = _zz.cargo_bbl / ThirdPartyVessel.DISCHARGE_RATE_BPH
+            _zz_rate = VESSEL_DISCHARGE_RATE_BPH.get("ZeeZee", ThirdPartyVessel.DISCHARGE_RATE_BPH)
+            _discharge_hrs = _zz.cargo_bbl / _zz_rate
             _zz.status = "DISCHARGING"
             self.mother_berth_free_at[_mn] = max(
                 self.mother_berth_free_at[_mn], t + _discharge_hrs)
