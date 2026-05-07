@@ -5072,6 +5072,8 @@ class Simulation:
                                     )
                                     if selected is None:
                                         selected = (arrival, arrival, _ddo_mother)
+                                    assigned_today = self.point_b_day_assigned_mothers.setdefault(day_key, set())
+                                    assigned_today.add(_ddo_mother)
                                     self.log_event(
                                         arrival, v.name, "MOTHER_PRIORITY_ASSIGNMENT",
                                         f"Discharge override [{v.voyage_code}]: forced to "
@@ -5400,6 +5402,8 @@ class Simulation:
                                     (x for x in candidates if x[2] == _ddo_mother),
                                     (decision_t, decision_t, _ddo_mother),
                                 )
+                                assigned_today = self.point_b_day_assigned_mothers.setdefault(day_key, set())
+                                assigned_today.add(_ddo_mother)
                                 if _ddo_mother != v.assigned_mother:
                                     self.log_event(
                                         decision_t, v.name, "MOTHER_PRIORITY_ASSIGNMENT",
