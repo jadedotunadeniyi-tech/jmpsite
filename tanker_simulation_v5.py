@@ -2587,6 +2587,14 @@ class Simulation:
             None
         )
 
+        # If the existing transient is a locked-pair receiver, the auto-engine must
+        # not interfere — only its designated discharger may pump to it.
+        # Skip this fire entirely and let the arrival handler do the work.
+        if existing_transient is not None:
+            _locked = getattr(existing_transient, "_mto_locked_discharger", None)
+            if _locked:
+                return
+
         if existing_transient is not None:
             _parcels_so_far = getattr(existing_transient, "_mto_parcels_received", 0)
             _trn_cap  = MTO_TRANSIENT_CAPACITY_BBL.get(
@@ -2662,9 +2670,14 @@ class Simulation:
                 # Secondary: most headroom; hard-wait bonus applied on top
                 return cap * 10_000 + hdroom + hard_bonus
 
-            # Exclude vessels that are never eligible to be MTO transient (receiver)
-            _eligible_transients = [vv for vv in waiters
-                                    if vv.name not in MTO_NEVER_RECEIVER]
+            # Exclude vessels that are never eligible to be MTO transient (receiver),
+            # AND exclude any vessel that is already paired via a locked discharger
+            # (the locked pairing is handled exclusively by the arrival handler).
+            _eligible_transients = [
+                vv for vv in waiters
+                if vv.name not in MTO_NEVER_RECEIVER
+                and not getattr(vv, "_mto_locked_discharger", None)
+            ]
             if not _eligible_transients:
                 return
             waiters_scored = sorted(_eligible_transients, key=_nom_score, reverse=True)
