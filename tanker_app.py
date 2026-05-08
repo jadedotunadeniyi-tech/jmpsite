@@ -2024,6 +2024,11 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                         _mto_recv_v.next_event_time    = 0.0
                         # Mark receiver ready to offload (MTO complete — no more parcels)
                         _mto_recv_v._mto_transient_since_day = None
+                        # Critical: flag the receiver as an MTO offload vessel so the
+                        # sim's _select_best_mother() excludes MTSanBarth as a candidate.
+                        # Without this, WAITING_BERTH_B falls through to normal mother
+                        # selection where _is_mto_offload=False → MTSanBarth is eligible.
+                        _mto_recv_v._is_mto_offload = True
 
                         # Logging
                         _trn_cap_log = getattr(mod, "MTO_TRANSIENT_CAPACITY_BBL",
