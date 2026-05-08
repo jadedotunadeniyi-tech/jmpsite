@@ -5899,6 +5899,23 @@ def main():
             with _hc[3]: st.markdown(_hdr_lbl + 'Cargo (bbl)</div>', unsafe_allow_html=True)
             st.markdown('<hr style="margin:0 0 8px;border-color:#e2e8f0">', unsafe_allow_html=True)
 
+            # ── Pre-compute MTO pairs from current session state ──────────────
+            # _mto_pairs maps  receiver_name → discharger_name
+            # _mto_discharger_of maps  discharger_name → receiver_name
+            # Built by scanning mto_pair_{vn} keys for any vessel whose location
+            # is currently "MTO — Receiver at BIA".
+            _mto_pairs        = {}  # {receiver: discharger}
+            _mto_discharger_of = {}  # {discharger: receiver}
+            for _mv in missing_vessels:
+                _mv_loc_key = f"vl_{_mv}"
+                _mv_loc_val = st.session_state.get(_mv_loc_key, "")
+                if _mv_loc_val == "MTO — Receiver at BIA":
+                    _mv_pair_key = f"mto_pair_{_mv}"
+                    _mv_paired   = st.session_state.get(_mv_pair_key, "")
+                    if _mv_paired and _mv_paired != _mv:
+                        _mto_pairs[_mv]          = _mv_paired
+                        _mto_discharger_of[_mv_paired] = _mv
+
             for vn in missing_vessels:
                 _base_vcap = mod.VESSEL_CAPACITIES.get(vn, mod.DAUGHTER_CARGO_BBL)
                 vcap = _base_vcap
@@ -5947,6 +5964,55 @@ def main():
                         f'margin-top:4px;display:block">{_zbadge} {_zone}</span>' +
                         f'</div>',
                         unsafe_allow_html=True)
+
+                # ── Discharger short-circuit ──────────────────────────────────
+                # If this vessel is claimed as MTO discharger by a receiver row,
+                # show a compact locked badge and skip all normal UI.
+                # The receiver row has already written manual_states for this vessel.
+                _claimed_by = _mto_discharger_of.get(vn, "")
+                if _claimed_by:
+                    with rc[1]:
+                        _dis_rate = (getattr(mod, "VESSEL_DISCHARGE_RATE_BPH", {}) or {}).get(vn)
+                        st.markdown(
+                            f'<div style="padding-top:30px">'
+                            f'<span style="background:#1e293b;color:#38bdf8;padding:3px 10px;'
+                            f'border-radius:4px;font-weight:600;font-size:12px">🔒 Lock & Offload</span>'
+                            f'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'
+                            f'→ pumps into <b>{_claimed_by}</b> (MTO receiver)'
+                            f'{"<br>Rate: " + f"{_dis_rate:,} bph" if _dis_rate else ""}'
+                            f'</div></div>',
+                            unsafe_allow_html=True)
+                    with rc[2]:
+                        st.markdown(
+                            '<div style="padding-top:30px;font-size:11px;color:#64748b">'
+                            'Cargo set on receiver row ↑</div>',
+                            unsafe_allow_html=True)
+                    with rc[3]:
+                        _dis_cg_key = f"vc_{vn}"
+                        if _dis_cg_key not in st.session_state:
+                            st.session_state[_dis_cg_key] = 0
+                        _dis_cargo = st.number_input(
+                            "Cargo", 0, _base_vcap * 2,
+                            step=1_000, key=_dis_cg_key,
+                            label_visibility="collapsed",
+                            help=f"Cargo on board {vn} at 08:00 — will be fully pumped to {_claimed_by}.",
+                        )
+                    # Keep manual_states authoritative with actual cargo entered
+                    manual_states[vn] = {
+                        "status":             "WAITING_BERTH_B",
+                        "cargo_bbl":          _dis_cargo,
+                        "cargo_api":          29.0,
+                        "location":           _claimed_by,
+                        "target_storage":     None,
+                        "target_mother":      None,
+                        "mto_target_vessel":  _claimed_by,
+                        "is_mto_receiver":    False,
+                        "notes":              f"Lock & Offload → {_claimed_by}",
+                        "hose_elapsed_hours": 0.0,
+                        "nominated_load_bbls": None,
+                    }
+                    st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
+                    continue   # skip all normal dropdowns and assembly for this vessel
 
                 # ── Col 1: Location dropdown ──────────────────────────────────
                 with rc[1]:
@@ -6219,37 +6285,17 @@ def main():
                     "target_mother":         _loc_entry.get("target_mother")
                                              or (_bia_nominated_mother if _is_bia_loc and not _is_mto_discharger else None),
                     # MTO-specific fields — carried through to vessel_states_json
-                    "mto_target_vessel":     _bia_mto_target if not _is_mto_receiver else None,
+                    # For receivers: mto_target_vessel stores the paired discharger name
+                    # so the sim knows which vessel to watch for; for dischargers the
+                    # field points to the receiver (written by the discharger short-circuit).
+                    "mto_target_vessel":     (_mto_target_vessel if _is_mto_receiver
+                                             else _bia_mto_target),
                     "is_mto_receiver":       _is_mto_receiver,
                     "notes":                 "",
                     "hose_elapsed_hours":    _bia_hose_elapsed,
                     # Nominated load ceiling for loading vessels (Challenges 1 & 2)
                     "nominated_load_bbls":   _nominated_load_bbl,
                 }
-                # ── MTO PAIR: auto-seed the discharger state ──────────────────
-                # When this vessel is the MTO receiver and a discharger is paired,
-                # write the discharger's state directly into manual_states so the
-                # operator doesn't need to configure it separately.
-                if _is_mto_receiver and _mto_target_vessel:
-                    _dis_vn = _mto_target_vessel   # e.g. "Rathbone"
-                    _dis_cg = st.session_state.get(f"vc_{_dis_vn}", 0)
-                    manual_states[_dis_vn] = {
-                        "status":             "WAITING_BERTH_B",
-                        "cargo_bbl":          _dis_cg,
-                        "cargo_api":          st.session_state.get(f"vbia_api_{_dis_vn}", 29.0),
-                        "location":           vn,          # discharger's location = receiver name
-                        "target_storage":     None,
-                        "target_mother":      None,
-                        "mto_target_vessel":  vn,          # discharger points at receiver
-                        "is_mto_receiver":    False,
-                        "notes":              f"Lock & Offload → {vn}",
-                        "hose_elapsed_hours": 0.0,
-                        "nominated_load_bbls": None,
-                    }
-                    st.caption(
-                        f"✅ **{_dis_vn}** automatically seeded as MTO discharger "
-                        f"(Lock & Offload → {vn})."
-                    )
                 st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
 
     # ── MT SanBarth startup position ─────────────────────────────────────────
