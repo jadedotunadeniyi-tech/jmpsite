@@ -5652,7 +5652,8 @@ def main():
                             if _vis_recv:
                                 # MTO receiver — location is the vessel's own name
                                 _vloc = _vname
-                            elif d.get("location") == "MTO_RECEIVER":
+                            elif _dv.get("location") == "MTO_RECEIVER":
+                                # Unified MTO_RECEIVER catalogue entry — location = vessel name
                                 _vloc = _vname
                             elif _vmto_tv:
                                 # MTO discharger — location is the target shuttle vessel
@@ -5851,12 +5852,16 @@ def main():
                 or _simval_to_display.get(_vstor)
             )
             if _disp:
-                st.session_state[f"vl_{_vn}"] = _disp   # always overwrite
-                # Also set the status selectbox to the matching label
+                # Only seed session state if not already set — avoids Streamlit 1.57
+                # "widget created with default AND set via Session State API" warning
+                # which triggers infinite rerun loops (keepalive timeout).
+                if f"vl_{_vn}" not in st.session_state:
+                    st.session_state[f"vl_{_vn}"] = _disp
+                # Status label: only seed on first render too
                 _loc_entry = LOC_BY_DISPLAY.get(_disp, {})
                 _stat_map  = {code: lbl for code, lbl in _loc_entry.get("statuses", [])}
                 _stat_lbl  = _stat_map.get(_vstatus)
-                if _stat_lbl:
+                if _stat_lbl and f"vs_{_vn}" not in st.session_state:
                     st.session_state[f"vs_{_vn}"] = _stat_lbl
 
             st.session_state[f"vc_{_vn}"] = _vcargo   # always overwrite cargo
