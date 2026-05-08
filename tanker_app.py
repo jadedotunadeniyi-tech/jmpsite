@@ -5075,11 +5075,15 @@ def main():
                     _ibom_loader = _vn.title().replace(" ", "")
                     break
 
-            # ── Mother vessels (rows 28-30, col 9 = actual ROB) ─────────────
+            # ── Mother vessels (rows 29-31, col 9 = actual ROB) ─────────────
+            # Row layout (with Woodstock now at row 28):
+            #   row 29 = MT Bryanston
+            #   row 30 = MT San Barth (MTSanBarth)
+            #   row 31 = MT Green Eagle
             mother_volumes = {
-                "Bryanston": abs(_num(rows, 28, 9)),
-                "MTSanBarth": abs(_num(rows, 29, 9)),
-                "GreenEagle": abs(_num(rows, 30, 9)),
+                "Bryanston": abs(_num(rows, 29, 9)),
+                "MTSanBarth": abs(_num(rows, 30, 9)),
+                "GreenEagle": abs(_num(rows, 31, 9)),
             }
 
             # ── Daughter vessels (rows 18-27) ────────────────────────────────
@@ -5098,12 +5102,12 @@ def main():
             # Positive = mother is RECEIVING; negative on MTSanBarth row = it is DISCHARGING
             _MOM_COLS = {18: "GreenEagle", 19: "Bryanston", 20: "MTSanBarth"}
 
-            # Detect MTSanBarth (MT San Barth) discharge target from row 29
+            # Detect MTSanBarth (MT San Barth) discharge target from row 30
             # col 18 negative on MTSanBarth row = discharging to GreenEagle
             _mtsanbarth_target_mom = ""
-            if _num(rows, 29, 18) < 0:
+            if _num(rows, 30, 18) < 0:
                 _mtsanbarth_target_mom = "GreenEagle"
-            elif _num(rows, 29, 19) < 0:
+            elif _num(rows, 30, 19) < 0:
                 _mtsanbarth_target_mom = "Bryanston"
 
             # ── MTO (Mid-Transfer Operation) detection ────────────────────────
