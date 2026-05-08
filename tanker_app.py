@@ -5385,10 +5385,24 @@ def main():
                     # Col 2: Nominated load ceiling (loading vessels only)
                     with _dc[2]:
                         if _dv_st_cur in _LOADING_STATUSES:
-                            _nom_cur = int(_dv.get("nominated_load_bbls") or _dv_cap)
+                            # min_value must never exceed value: when cargo already
+                            # overflows vessel capacity (e.g. MTO receiver with 78k
+                            # on a 43k vessel), clamp min to 0 and default to the
+                            # larger of capacity or current cargo to avoid
+                            # StreamlitValueBelowMinError.
+                            _nom_min = 0
+                            _nom_cur = max(
+                                int(_dv.get("nominated_load_bbls") or _dv_cap),
+                                _dv_cargo_val,
+                            )
+                            _nom_key = f"pdf_dv_nom_{_dvi}"
+                            if _nom_key not in st.session_state:
+                                st.session_state[_nom_key] = _nom_cur
+                            elif st.session_state[_nom_key] < _nom_min:
+                                st.session_state[_nom_key] = _nom_cur
                             _dv["nominated_load_bbls"] = st.number_input(
-                                "nom", _dv_cargo_val, _dv_cap * 2, _nom_cur,
-                                step=1_000, key=f"pdf_dv_nom_{_dvi}",
+                                "nom", _nom_min, _dv_cap * 2,
+                                step=1_000, key=_nom_key,
                                 label_visibility="collapsed",
                                 help="**Nominated load** — total volume this vessel should load before departing.",
                             )
