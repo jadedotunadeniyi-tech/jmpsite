@@ -951,9 +951,10 @@ LOCATION_CATALOGUE = [
         ("WAITING_MOTHER_RETURN",  "⏳ Waiting — mother vessel away at export"),
     ]},
     # ── MTO (Mid-Transfer Operation) at BIA ─────────────────────────────────
-    # Single entry: selecting this converts the vessel to MTO receiver.
-    # The discharger is chosen via a "Lock MTO Pair" selectbox on this row —
-    # no separate discharger entries needed.
+    # Receiver: one entry — operator sets a vessel as the MTO transient.
+    # Discharger: one entry per eligible receiver vessel (Lock & Offload → X).
+    # The discharger picks their target directly from the location dropdown —
+    # no dynamic session-state pairing required.
     {"display": "MTO — Receiver at BIA",
      "sim_value": "MTO_RECEIVER",
      "field_zone": "BIA", "target_mother": None, "target_storage": None,
@@ -961,6 +962,106 @@ LOCATION_CATALOGUE = [
      "statuses": [
         ("WAITING_BERTH_B", "📦 Lock & Load — receiving from discharger"),
      ]},
+    # MTO discharger → Watson
+    {"display": "MTO — Lock & Offload → Watson",
+     "sim_value": "Watson",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Watson",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Watson"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Watson"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Watson"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Watson"),
+     ]},
+    # MTO discharger → Sherlock
+    {"display": "MTO — Lock & Offload → Sherlock",
+     "sim_value": "Sherlock",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Sherlock",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Sherlock"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Sherlock"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Sherlock"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Sherlock"),
+     ]},
+    # MTO discharger → Laphroaig
+    {"display": "MTO — Lock & Offload → Laphroaig",
+     "sim_value": "Laphroaig",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Laphroaig",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Laphroaig"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Laphroaig"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Laphroaig"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Laphroaig"),
+     ]},
+    # MTO discharger → Rathbone
+    {"display": "MTO — Lock & Offload → Rathbone",
+     "sim_value": "Rathbone",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Rathbone",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Rathbone"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Rathbone"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Rathbone"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Rathbone"),
+     ]},
+    # MTO discharger → Balham
+    {"display": "MTO — Lock & Offload → Balham",
+     "sim_value": "Balham",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Balham",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Balham"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Balham"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Balham"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Balham"),
+     ]},
+    # MTO discharger → Bedford
+    {"display": "MTO — Lock & Offload → Bedford",
+     "sim_value": "Bedford",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Bedford",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Bedford"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Bedford"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Bedford"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Bedford"),
+     ]},
+    # MTO discharger → Amyla
+    {"display": "MTO — Lock & Offload → Amyla",
+     "sim_value": "Amyla",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Amyla",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Amyla"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Amyla"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Amyla"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Amyla"),
+     ]},
+    # MTO discharger → Bagshot
+    {"display": "MTO — Lock & Offload → Bagshot",
+     "sim_value": "Bagshot",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Bagshot",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Bagshot"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Bagshot"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Bagshot"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Bagshot"),
+     ]},
+    # MTO discharger → Woodstock
+    {"display": "MTO — Lock & Offload → Woodstock",
+     "sim_value": "Woodstock",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Woodstock",
+     "statuses": [
+        ("WAITING_BERTH_B", "🔒 Lock & Offload — queued to pump into Woodstock"),
+        ("HOSE_CONNECT_B",  "🔧 MTO — hose connected, pumping to Woodstock"),
+        ("DISCHARGING",     "⬇️ MTO — pumping cargo to Woodstock"),
+        ("CAST_OFF_B",      "↩️ MTO — complete, casting off from Woodstock"),
+     ]},
+
         # ── Returning from BIA — one entry per storage destination ──────────────
     # Chapel and JasmineS are both point A: sim picks between them by stock level
     {"display": "Returning → SanBarth (Chapel/JasmineS)", "sim_value": "En Route BIA→Storage",
@@ -5899,23 +6000,6 @@ def main():
             with _hc[3]: st.markdown(_hdr_lbl + 'Cargo (bbl)</div>', unsafe_allow_html=True)
             st.markdown('<hr style="margin:0 0 8px;border-color:#e2e8f0">', unsafe_allow_html=True)
 
-            # ── Pre-compute MTO pairs from current session state ──────────────
-            # _mto_pairs maps  receiver_name → discharger_name
-            # _mto_discharger_of maps  discharger_name → receiver_name
-            # Built by scanning mto_pair_{vn} keys for any vessel whose location
-            # is currently "MTO — Receiver at BIA".
-            _mto_pairs        = {}  # {receiver: discharger}
-            _mto_discharger_of = {}  # {discharger: receiver}
-            for _mv in missing_vessels:
-                _mv_loc_key = f"vl_{_mv}"
-                _mv_loc_val = st.session_state.get(_mv_loc_key, "")
-                if _mv_loc_val == "MTO — Receiver at BIA":
-                    _mv_pair_key = f"mto_pair_{_mv}"
-                    _mv_paired   = st.session_state.get(_mv_pair_key, "")
-                    if _mv_paired and _mv_paired != _mv:
-                        _mto_pairs[_mv]          = _mv_paired
-                        _mto_discharger_of[_mv_paired] = _mv
-
             for vn in missing_vessels:
                 _base_vcap = mod.VESSEL_CAPACITIES.get(vn, mod.DAUGHTER_CARGO_BBL)
                 vcap = _base_vcap
@@ -5964,55 +6048,6 @@ def main():
                         f'margin-top:4px;display:block">{_zbadge} {_zone}</span>' +
                         f'</div>',
                         unsafe_allow_html=True)
-
-                # ── Discharger short-circuit ──────────────────────────────────
-                # If this vessel is claimed as MTO discharger by a receiver row,
-                # show a compact locked badge and skip all normal UI.
-                # The receiver row has already written manual_states for this vessel.
-                _claimed_by = _mto_discharger_of.get(vn, "")
-                if _claimed_by:
-                    with rc[1]:
-                        _dis_rate = (getattr(mod, "VESSEL_DISCHARGE_RATE_BPH", {}) or {}).get(vn)
-                        st.markdown(
-                            f'<div style="padding-top:30px">'
-                            f'<span style="background:#1e293b;color:#38bdf8;padding:3px 10px;'
-                            f'border-radius:4px;font-weight:600;font-size:12px">🔒 Lock & Offload</span>'
-                            f'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'
-                            f'→ pumps into <b>{_claimed_by}</b> (MTO receiver)'
-                            f'{"<br>Rate: " + f"{_dis_rate:,} bph" if _dis_rate else ""}'
-                            f'</div></div>',
-                            unsafe_allow_html=True)
-                    with rc[2]:
-                        st.markdown(
-                            '<div style="padding-top:30px;font-size:11px;color:#64748b">'
-                            'Cargo set on receiver row ↑</div>',
-                            unsafe_allow_html=True)
-                    with rc[3]:
-                        _dis_cg_key = f"vc_{vn}"
-                        if _dis_cg_key not in st.session_state:
-                            st.session_state[_dis_cg_key] = 0
-                        _dis_cargo = st.number_input(
-                            "Cargo", 0, _base_vcap * 2,
-                            step=1_000, key=_dis_cg_key,
-                            label_visibility="collapsed",
-                            help=f"Cargo on board {vn} at 08:00 — will be fully pumped to {_claimed_by}.",
-                        )
-                    # Keep manual_states authoritative with actual cargo entered
-                    manual_states[vn] = {
-                        "status":             "WAITING_BERTH_B",
-                        "cargo_bbl":          _dis_cargo,
-                        "cargo_api":          29.0,
-                        "location":           _claimed_by,
-                        "target_storage":     None,
-                        "target_mother":      None,
-                        "mto_target_vessel":  _claimed_by,
-                        "is_mto_receiver":    False,
-                        "notes":              f"Lock & Offload → {_claimed_by}",
-                        "hose_elapsed_hours": 0.0,
-                        "nominated_load_bbls": None,
-                    }
-                    st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
-                    continue   # skip all normal dropdowns and assembly for this vessel
 
                 # ── Col 1: Location dropdown ──────────────────────────────────
                 with rc[1]:
@@ -6180,54 +6215,28 @@ def main():
                     }
 
                     if _is_mto_receiver:
-                        # ── MTO LOCK PAIR UI ─────────────────────────────────
-                        # The receiver vessel shows ONE selectbox to pick the
-                        # discharger (the vessel that will pump cargo into it).
-                        # This single control is all the operator needs to set —
-                        # no separate row for the discharger.
-                        _MTO_NEVER_RECEIVER = getattr(mod, "MTO_NEVER_RECEIVER",
-                                                        {"Rahama", "SantaMonica"})
-                        _all_vessel_names = getattr(mod, "VESSEL_NAMES", [])
-                        _eligible_dischargers = [
-                            v2 for v2 in _all_vessel_names
-                            if v2 != vn and v2 not in _MTO_NEVER_RECEIVER
-                        ] or [v2 for v2 in [
-                            "Sherlock","Laphroaig","Watson","Bedford","Balham",
-                            "Amyla","Bagshot","Rathbone","SantaMonica","Woodstock","Rahama"
-                        ] if v2 != vn]
-                        _pair_key = f"mto_pair_{vn}"
-                        if _pair_key not in st.session_state:
-                            st.session_state[_pair_key] = _eligible_dischargers[0]
-
-                        st.markdown(
-                            "<div style='font-size:12px;color:#94a3b8;"
-                            "margin-bottom:2px'>🔗 Lock & Load — discharger vessel</div>",
-                            unsafe_allow_html=True)
-                        _paired_discharger = st.selectbox(
-                            "Discharger",
-                            options=_eligible_dischargers,
-                            key=_pair_key,
-                            label_visibility="collapsed",
-                            help=(
-                                "The vessel that will transfer cargo INTO this receiver "
-                                "at BIA under its standard discharge rate. "
-                                "The sim will force the discharger to berth alongside "
-                                "this vessel and pump its full cargo across before either "
-                                "vessel proceeds to a mother."
-                            ),
-                        )
-                        # Store the pair so vessel_states carries both ends
-                        _bia_mto_target    = vn              # receiver = this vessel
-                        _mto_target_vessel = _paired_discharger  # discharger = chosen vessel
-                        st.caption(
-                            f"🔒 **{_paired_discharger}** → locked to offload into **{vn}** "
-                            f"(Lock & Offload). Both vessels will be seeded correctly."
+                        # MTO RECEIVER — show simple info only.
+                        # The DISCHARGER sets their own location to
+                        # "MTO — Lock & Offload → {vn}" — no selectbox here.
+                        st.info(
+                            f"📦 **Lock & Load** — {vn} is set as MTO receiver.\n\n"
+                            f"Set the discharger vessel's **Location** to "
+                            f"'MTO — Lock & Offload → {vn}' in their row.",
+                            icon="🔗",
                         )
 
                     elif _is_mto_discharger:
-                        # Legacy discharger path — kept for CSV-import population,
-                        # but the operator no longer sets this manually.
+                        # DISCHARGER — target receiver is in the catalogue entry.
                         _bia_mto_target = _mto_target_vessel
+                        _dis_rate = (getattr(mod, "VESSEL_DISCHARGE_RATE_BPH", {}) or {}).get(vn)
+                        _est_hrs  = (f"{cg / _dis_rate:.1f} h" if _dis_rate and cg else "~12 h")
+                        st.info(
+                            f"🔒 **Lock & Offload → {_mto_target_vessel}**\n\n"
+                            f"Full cargo pumped into **{_mto_target_vessel}** at BIA.\n"
+                            f"Rate: {f'{_dis_rate:,} bph' if _dis_rate else 'default'}"
+                            f" · Est. pump time: {_est_hrs}",
+                            icon="⬇️",
+                        )
 
                     else:
                         # Normal mother discharge — show mother selector
@@ -6285,11 +6294,9 @@ def main():
                     "target_mother":         _loc_entry.get("target_mother")
                                              or (_bia_nominated_mother if _is_bia_loc and not _is_mto_discharger else None),
                     # MTO-specific fields — carried through to vessel_states_json
-                    # For receivers: mto_target_vessel stores the paired discharger name
-                    # so the sim knows which vessel to watch for; for dischargers the
-                    # field points to the receiver (written by the discharger short-circuit).
-                    "mto_target_vessel":     (_mto_target_vessel if _is_mto_receiver
-                                             else _bia_mto_target),
+                    # Discharger: mto_target_vessel = receiver name (from catalogue entry)
+                    # Receiver:   mto_target_vessel = "" (the link is on the discharger side)
+                    "mto_target_vessel":     _bia_mto_target or "",
                     "is_mto_receiver":       _is_mto_receiver,
                     "notes":                 "",
                     "hose_elapsed_hours":    _bia_hose_elapsed,
