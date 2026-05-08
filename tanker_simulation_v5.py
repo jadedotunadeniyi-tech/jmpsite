@@ -5315,6 +5315,27 @@ class Simulation:
                 elif v.status == "WAITING_BERTH_B":
                     decision_t = t
 
+                    # ── MTO transient vessel: cannot berth while discharger is active ───
+                    # If a discharger is currently transferring cargo to this MTO receiver,
+                    # block it from berthing a mother vessel or transient storage until
+                    # the discharge (including cast-off) is complete.  This ensures the
+                    # MTO receiver accumulates the full incoming cargo before offloading.
+                    _mto_berth_free = getattr(v, "_mto_berth_free_at", 0.0)
+                    _is_mto_receiver = getattr(v, "_mto_transient_since_day", None) is not None
+                    if _is_mto_receiver and _mto_berth_free > decision_t:
+                        # Discharger still active — hold this vessel, do not allow berthing
+                        _next_check = self.next_daylight_hourly_berth_check(decision_t, point="B")
+                        v.next_event_time = max(_mto_berth_free, _next_check)
+                        self.log_event(
+                            decision_t, v.name, "WAITING_BERTH_B",
+                            f"[MTO receiver] Active MTO discharge in progress — "
+                            f"cannot berth mother or transient storage until "
+                            f"{self.hours_to_dt(_mto_berth_free).strftime('%Y-%m-%d %H:%M')} "
+                            f"(discharge cast-off complete)",
+                            voyage_num=v.current_voyage,
+                        )
+                        continue
+
                     # ── MTO transient vessel: opportunistic offload priority ───
                     # A transient vessel tries to berth at a primary mother on
                     # every hourly check — as soon as a window opens it takes it.
