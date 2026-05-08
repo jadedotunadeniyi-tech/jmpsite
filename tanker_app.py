@@ -5112,8 +5112,8 @@ def main():
             # Positive value in col 21 → that vessel IS the MTO receiver
             # Negative value in col 21 → that vessel is DISCHARGING into the MTO receiver
             _ALL_DAUGHTER_NAMES = ["Sherlock","Laphroaig","Watson","Bedford","Balham",
-                                   "Bagshot","Rahama","Rathbone","SantaMonica","Woodstock"]
-            _MTO_SCAN_ROWS = list(range(18, 28))
+                                   "Amyla","Bagshot","Rahama","Rathbone","SantaMonica","Woodstock"]
+            _MTO_SCAN_ROWS = list(range(18, 29))   # rows 18-28 inclusive (Woodstock now at row 28)
 
             # Find the MTO receiver: positive value in col 21
             _mto_receiver_name = ""
@@ -5142,16 +5142,17 @@ def main():
                             break
 
             _DAUGHTER_ROWS = {
-                "Sherlock":    18,
-                "Laphroaig":   19,
-                "Watson":      20,
-                "Bedford":     21,
-                "Balham":      22,
-                "Bagshot":     23,
-                "Rahama":      24,
-                "Rathbone":    25,
-                "SantaMonica": 26,
-                "Woodstock":   27,
+                "Sherlock":    18,   # CSV row 18
+                "Laphroaig":   19,   # CSV row 19
+                "Watson":      20,   # CSV row 20
+                "Bedford":     21,   # CSV row 21
+                "Balham":      22,   # CSV row 22
+                "Amyla":       23,   # CSV row 23 — must come before Bagshot
+                "Bagshot":     24,   # CSV row 24
+                "Rahama":      25,   # CSV row 25
+                "Rathbone":    26,   # CSV row 26
+                "SantaMonica": 27,   # CSV row 27
+                "Woodstock":   28,   # CSV row 28
             }
 
             daughter_vessels = []
