@@ -487,6 +487,7 @@ VESSEL_COLORS = {
     "Woodstock": "#ff4d8d",   # hot pink      — boosted from #e91e63
     "Bagshot"  : "#00bcd4",   # cyan          — unchanged
     "Watson"   : "#b0bec5",   # silver        — lightened from #95a5a6
+    "Rahama"   : "#fb923c",   # orange
     "Amyla"  : "#7f8c8d",   # steel gray    — Point A-only 63k
     "MTSanBarth": "#000000",   # deep black    — distinct from Bedford amber
     "ZeeZee"   : "#1e3a5f",   # deep navy     — third-party visitor
@@ -501,8 +502,7 @@ STORAGE_COLORS = {
 }
 MOTHER_COLORS = {
     "Bryanston" : "#1abc9c",  # bright teal   — boosted from #16a085
-    "GreenEagle" : "#ff5555",  # vivid red     — boosted from #c0392b
-    "GreenEagle": "#c084fc",  # vivid purple  — boosted from #7d3c98
+    "GreenEagle": "#c084fc",   # vivid purple
     "MTSanBarth" : "#000000",  # deep black    — distinct from Bedford amber
 }
 STATUS_LIGHTNESS = {
@@ -745,6 +745,11 @@ LOCATION_CATALOGUE = [
         ("WAITING_DAYLIGHT",   "🌙 Waiting — daylight window"),
         ("WAITING_TIDAL",      "🌊 Waiting — tidal window"),
     ]},
+    # ── Rahama (Chapel / JasmineS only — no Westmore, Duke, Starturn, Ibom) ──────
+    {"display": "Returning → Chapel/JasmineS",        "sim_value": "En Route BIA→Storage",
+     "field_zone": "Transit", "target_storage": "Chapel", "target_mother": None,
+     "vessel_filter": ["Rahama"],
+     "statuses": [("SAILING_BA", "🚢 Returning — BIA to Chapel/JasmineS")]},
     # ── En route → BIA — Leg 1: storage → Breakwater ─────────────────────────
     {"display": "Sailing → Bryanston (A/C outbound)", "sim_value": "En Route SanBarth→BIA",
      "field_zone": "Transit", "target_mother": "Bryanston", "target_storage": None,
@@ -931,19 +936,7 @@ LOCATION_CATALOGUE = [
         ("WAITING_CAST_OFF",       "⏳ Discharge complete — awaiting cast-off window"),
         ("WAITING_MOTHER_RETURN",  "⏳ Waiting — mother vessel away at export"),
     ]},
-    {"display": "GreenEagle (BIA)",    "sim_value": "GreenEagle",
-     "field_zone": "BIA",
-     "statuses": [
-        ("DISCHARGING",            "⬇️ Discharge — in progress"),
-        ("HOSE_CONNECT_B",         "🔧 Hose connection underway"),
-        ("BERTHING_B",             "🔗 Berthing in progress"),
-        ("WAITING_BERTH_B",        "⏳ Arrived — waiting for berth slot"),
-        ("WAITING_MOTHER_CAPACITY","⏳ Berthed — waiting for mother capacity"),
-        ("CAST_OFF_B",             "↩️ Discharge complete — cast off from mother"),
-        ("IDLE_B",                 "🟢 Idle at mother — discharge complete"),
-        ("WAITING_CAST_OFF",       "⏳ Discharge complete — awaiting cast-off window"),
-        ("WAITING_MOTHER_RETURN",  "⏳ Waiting — mother vessel away at export"),
-    ]},
+
     {"display": "MT SanBarth (BIA)",     "sim_value": "MTSanBarth",
      "field_zone": "BIA",
      "statuses": [
@@ -1122,6 +1115,17 @@ LOCATION_CATALOGUE = [
         ("BERTHING_B",       "🔗 MTO discharge — berthing alongside Amyla"),
         ("WAITING_BERTH_B",  "⏳ MTO discharge — waiting to berth alongside Amyla"),
         ("CAST_OFF_B",       "↩️ MTO discharge — complete, casting off from Amyla"),
+    ]},
+    # Rahama: MTO discharger only (never receiver per policy)
+    {"display": "MTO — Discharging to Watson",   "sim_value": "Watson",
+     "field_zone": "BIA", "target_mother": None, "target_storage": None,
+     "mto_discharger": True, "mto_target_vessel": "Watson",
+     "statuses": [
+        ("DISCHARGING",      "⬇️ MTO discharge — pumping cargo to Watson"),
+        ("HOSE_CONNECT_B",   "🔧 MTO discharge — hose connection to Watson"),
+        ("BERTHING_B",       "🔗 MTO discharge — berthing alongside Watson"),
+        ("WAITING_BERTH_B",  "⏳ MTO discharge — waiting to berth alongside Watson"),
+        ("CAST_OFF_B",       "↩️ MTO discharge — complete, casting off from Watson"),
     ]},
     # ── Returning from BIA — one entry per storage destination ──────────────
     # Chapel and JasmineS are both point A: sim picks between them by stock level
@@ -3682,7 +3686,6 @@ def chart_util(tl_df):
 
 def chart_mothers(tl_df, export_trigger, cap_by_name, export_trigger_by_name=None):
     fills = {"Bryanston" :"rgba(26,188,156,0.12)",
-             "GreenEagle" :"rgba(255,85,85,0.12)",
              "GreenEagle":"rgba(192,132,252,0.12)",
              "MTSanBarth" :"rgba(243,156,18,0.12)"}
     fig = go.Figure()
@@ -5108,7 +5111,7 @@ def main():
             # Positive value in col 21 → that vessel IS the MTO receiver
             # Negative value in col 21 → that vessel is DISCHARGING into the MTO receiver
             _ALL_DAUGHTER_NAMES = ["Sherlock","Laphroaig","Watson","Bedford","Balham",
-                                   "Bagshot","Rathbone","SantaMonica","Woodstock"]
+                                   "Bagshot","Rahama","Rathbone","SantaMonica","Woodstock"]
             _MTO_SCAN_ROWS = list(range(18, 28))
 
             # Find the MTO receiver: positive value in col 21
@@ -7402,1868 +7405,1880 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
         )
 
 
+
+
     # ==========================================================================
-    # ── SECTION: TIDAL PREDICTION ─────────────────────────────────────────────
+    # ── SECTION: JMP & TIDAL PREDICTION (tabbed) ─────────────────────────────
     # ==========================================================================
-    sec("🗺️ Journey Management Plan")
+    _jmp_tab, _tide_tab = st.tabs([
+        "🗺️ Journey Management Plan",
+        "🌊 Tidal Prediction",
+    ])
 
-    # ── Loading-Point Override Panel ──────────────────────────────────────────
-    # Lets the operator manually reassign a Point A/E vessel to a different
-    # permitted storage on a specific day, then re-run the simulation with
-    # that forced assignment to see the true downstream effect.
-    _sp_map_jmp    = getattr(mod, "STORAGE_POINT", {})
-    _all_storages  = list(getattr(mod, "STORAGE_NAMES", _sp_map_jmp.keys()))
+    with _jmp_tab:
+        sec("🗺️ Journey Management Plan")
 
-    # Pull every permission set from the sim module so the UI mirrors the
-    # sim exactly — no duplication of business rules in the app layer.
-    _pt_ao          = set(getattr(mod, "POINT_A_ONLY_VESSELS",      {"Amyla"}))
-    _westmore_perm  = set(getattr(mod, "WESTMORE_PERMITTED_VESSELS", set()))
-    _duke_perm      = set(getattr(mod, "DUKE_PERMITTED_VESSELS",     set()))
-    _starturn_perm  = set(getattr(mod, "STARTURN_PERMITTED_VESSELS", set()))
-    _pgm_perm       = set(getattr(mod, "PGM_PERMITTED_VESSELS",      {"SantaMonica"}))
-    _sm_perm        = set(getattr(mod, "SANTAMONICA_PERMITTED_STORAGES", ()))
-    _watson_perm    = set(getattr(mod, "WATSON_PERMITTED_STORAGES",   ()))
-    _storage_pt     = _sp_map_jmp   # {storage_name: point_letter}
-    _stor_primary   = getattr(mod, "STORAGE_PRIMARY_NAME",   "Chapel")
-    _stor_secondary = getattr(mod, "STORAGE_SECONDARY_NAME", "JasmineS")
-    _stor_tertiary  = getattr(mod, "STORAGE_TERTIARY_NAME",  "Westmore")
-    _stor_quaternary= getattr(mod, "STORAGE_QUATERNARY_NAME","Duke")
-    _stor_quinary   = getattr(mod, "STORAGE_QUINARY_NAME",   "Starturn")
-    _stor_senary    = getattr(mod, "STORAGE_SENARY_NAME",    "PGM")
 
-    def _allowed_ae_storages(vessel):
-        """All storages this vessel is permitted to load from.
+        # ── Loading-Point Override Panel ──────────────────────────────────────────
+        # Lets the operator manually reassign a Point A/E vessel to a different
+        # permitted storage on a specific day, then re-run the simulation with
+        # that forced assignment to see the true downstream effect.
+        _sp_map_jmp    = getattr(mod, "STORAGE_POINT", {})
+        _all_storages  = list(getattr(mod, "STORAGE_NAMES", _sp_map_jmp.keys()))
 
-        Mirrors storage_allowed_for_vessel() in the sim exactly so the UI
-        and the simulation always agree on what is and is not permitted.
-        Covers all six storages (Chapel, JasmineS, Westmore, Duke, Starturn, PGM).
-        """
-        result = []
-        for _s in _all_storages:
-            _pt = _storage_pt.get(_s, "A")
-            # SantaMonica and Watson use dedicated allowlists
-            if vessel == "SantaMonica":
-                if _s in _sm_perm:
-                    result.append(_s)
-                continue
-            if vessel == "Watson":
-                if _s in _watson_perm:
-                    result.append(_s)
-                continue
-            # Point-A-only vessels may never leave Point A
-            if vessel in _pt_ao and _pt != "A":
-                continue
-            # Storage-specific permission gates
-            if _s == _stor_tertiary  and vessel not in _westmore_perm:
-                continue
-            if _s == _stor_quaternary and vessel not in _duke_perm:
-                continue
-            if _s == _stor_quinary   and vessel not in _starturn_perm:
-                continue
-            if _s == _stor_senary    and vessel not in _pgm_perm:
-                continue
-            result.append(_s)
-        return sorted(result)
+        # Pull every permission set from the sim module so the UI mirrors the
+        # sim exactly — no duplication of business rules in the app layer.
+        _pt_ao          = set(getattr(mod, "POINT_A_ONLY_VESSELS",      {"Amyla"}))
+        _westmore_perm  = set(getattr(mod, "WESTMORE_PERMITTED_VESSELS", set()))
+        _duke_perm      = set(getattr(mod, "DUKE_PERMITTED_VESSELS",     set()))
+        _starturn_perm  = set(getattr(mod, "STARTURN_PERMITTED_VESSELS", set()))
+        _pgm_perm       = set(getattr(mod, "PGM_PERMITTED_VESSELS",      {"SantaMonica"}))
+        _sm_perm        = set(getattr(mod, "SANTAMONICA_PERMITTED_STORAGES", ()))
+        _watson_perm    = set(getattr(mod, "WATSON_PERMITTED_STORAGES",   ()))
+        _storage_pt     = _sp_map_jmp   # {storage_name: point_letter}
+        _stor_primary   = getattr(mod, "STORAGE_PRIMARY_NAME",   "Chapel")
+        _stor_secondary = getattr(mod, "STORAGE_SECONDARY_NAME", "JasmineS")
+        _stor_tertiary  = getattr(mod, "STORAGE_TERTIARY_NAME",  "Westmore")
+        _stor_quaternary= getattr(mod, "STORAGE_QUATERNARY_NAME","Duke")
+        _stor_quinary   = getattr(mod, "STORAGE_QUINARY_NAME",   "Starturn")
+        _stor_senary    = getattr(mod, "STORAGE_SENARY_NAME",    "PGM")
 
-    # Build vessel list: any non-MTSanBarth vessel that has at least one
-    # permitted storage (excludes vessels with no valid override targets).
-    _override_vessels = sorted(
-        v for v in (S.get("vessel_names", []) or vnames)
-        if v != "MTSanBarth"
-        and bool(_allowed_ae_storages(v))
-    )
+        def _allowed_ae_storages(vessel):
+            """All storages this vessel is permitted to load from.
 
-    _existing_overrides = st.session_state.get("jmp_storage_overrides", {})
+            Mirrors storage_allowed_for_vessel() in the sim exactly so the UI
+            and the simulation always agree on what is and is not permitted.
+            Covers all six storages (Chapel, JasmineS, Westmore, Duke, Starturn, PGM).
+            """
+            result = []
+            for _s in _all_storages:
+                _pt = _storage_pt.get(_s, "A")
+                # SantaMonica and Watson use dedicated allowlists
+                if vessel == "SantaMonica":
+                    if _s in _sm_perm:
+                        result.append(_s)
+                    continue
+                if vessel == "Watson":
+                    if _s in _watson_perm:
+                        result.append(_s)
+                    continue
+                # Point-A-only vessels may never leave Point A
+                if vessel in _pt_ao and _pt != "A":
+                    continue
+                # Storage-specific permission gates
+                if _s == _stor_tertiary  and vessel not in _westmore_perm:
+                    continue
+                if _s == _stor_quaternary and vessel not in _duke_perm:
+                    continue
+                if _s == _stor_quinary   and vessel not in _starturn_perm:
+                    continue
+                if _s == _stor_senary    and vessel not in _pgm_perm:
+                    continue
+                result.append(_s)
+            return sorted(result)
 
-    # ── Helper: compute sim-hour from a calendar date ─────────────────────────
-    def _date_to_sim_hour(cal_date):
-        """Convert a calendar date to the sim-hour at 08:00 on that day."""
-        try:
-            _epoch = _dt.date.fromisoformat(_start_iso_str)
-        except Exception:
-            _epoch = _dt.date.today()
-        delta_days = (cal_date - _epoch).days
-        # t=0 is 08:00 on day 1; 08:00 on day N is t=(N-1)*24 hours
-        return delta_days * 24  # 08:00 on that calendar date
-
-    with st.expander(
-        "🔀 Loading-Point Override Panel" +
-        (f" · {sum(len(v) for v in _existing_overrides.values())} active override(s)"
-         if _existing_overrides else ""),
-        expanded=bool(_existing_overrides),
-    ):
-        st.markdown(
-            '<div style="font-size:12px;color:#64748b;margin-bottom:10px">'
-            'Force any vessel to a specific loading storage on a given day. '
-            'Optionally set a <b>Load date</b> to hold the vessel until that day — '
-            'it will wait idle and load once the storage is free on the target date. '
-            'The simulation re-runs with the override applied, immune to reassessment, '
-            'so all downstream timings update accurately.</div>',
-            unsafe_allow_html=True,
+        # Build vessel list: any non-MTSanBarth vessel that has at least one
+        # permitted storage (excludes vessels with no valid override targets).
+        _override_vessels = sorted(
+            v for v in (S.get("vessel_names", []) or vnames)
+            if v != "MTSanBarth"
+            and bool(_allowed_ae_storages(v))
         )
 
-        # ── Add a new override ────────────────────────────────────────────────
-        _ov_r1c1, _ov_r1c2, _ov_r1c3 = st.columns([2, 1, 2])
-        with _ov_r1c1:
-            _ov_vessel = st.selectbox(
-                "Vessel", options=_override_vessels,
-                key="ov_vessel",
-                help="Vessel to force to a specific storage.",
-            )
-        with _ov_r1c2:
-            _ov_day = st.number_input(
-                "Trigger day", min_value=1,
-                max_value=params.get("sim_days", 30),
-                value=1, step=1,
-                key="ov_day",
-                help=(
-                    "Day the vessel becomes idle and the override activates. "
-                    "If Load date is set, the vessel is held at this trigger day "
-                    "then dispatched to the storage on the Load date."
-                ),
-            )
-        _allowed = _allowed_ae_storages(_ov_vessel) if _ov_vessel else []
-        with _ov_r1c3:
-            _ov_storage = st.selectbox(
-                "Storage",
-                options=_allowed,
-                key="ov_storage",
-                help="Only storages this vessel is permitted to load from are shown.",
-            ) if _allowed else st.selectbox(
-                "Storage", options=[], key="ov_storage",
+        _existing_overrides = st.session_state.get("jmp_storage_overrides", {})
+
+        # ── Helper: compute sim-hour from a calendar date ─────────────────────────
+        def _date_to_sim_hour(cal_date):
+            """Convert a calendar date to the sim-hour at 08:00 on that day."""
+            try:
+                _epoch = _dt.date.fromisoformat(_start_iso_str)
+            except Exception:
+                _epoch = _dt.date.today()
+            delta_days = (cal_date - _epoch).days
+            # t=0 is 08:00 on day 1; 08:00 on day N is t=(N-1)*24 hours
+            return delta_days * 24  # 08:00 on that calendar date
+
+        with st.expander(
+            "🔀 Loading-Point Override Panel" +
+            (f" · {sum(len(v) for v in _existing_overrides.values())} active override(s)"
+             if _existing_overrides else ""),
+            expanded=bool(_existing_overrides),
+        ):
+            st.markdown(
+                '<div style="font-size:12px;color:#64748b;margin-bottom:10px">'
+                'Force any vessel to a specific loading storage on a given day. '
+                'Optionally set a <b>Load date</b> to hold the vessel until that day — '
+                'it will wait idle and load once the storage is free on the target date. '
+                'The simulation re-runs with the override applied, immune to reassessment, '
+                'so all downstream timings update accurately.</div>',
+                unsafe_allow_html=True,
             )
 
-        # ── Second row: optional date-shift ───────────────────────────────────
-        _ov_r2c1, _ov_r2c2, _ov_r2c3 = st.columns([2, 2, 1])
-        with _ov_r2c1:
-            _ov_use_date = st.checkbox(
-                "📅 Load on a specific date (date-shift)",
-                key="ov_use_date",
-                help=(
-                    "Enable to hold the vessel idle after the trigger day and "
-                    "force loading from the selected storage on the chosen date. "
-                    "The vessel waits patiently until the storage becomes idle "
-                    "within the daylight berthing window on that date."
-                ),
+            # ── Add a new override ────────────────────────────────────────────────
+            _ov_r1c1, _ov_r1c2, _ov_r1c3 = st.columns([2, 1, 2])
+            with _ov_r1c1:
+                _ov_vessel = st.selectbox(
+                    "Vessel", options=_override_vessels,
+                    key="ov_vessel",
+                    help="Vessel to force to a specific storage.",
+                )
+            with _ov_r1c2:
+                _ov_day = st.number_input(
+                    "Trigger day", min_value=1,
+                    max_value=params.get("sim_days", 30),
+                    value=1, step=1,
+                    key="ov_day",
+                    help=(
+                        "Day the vessel becomes idle and the override activates. "
+                        "If Load date is set, the vessel is held at this trigger day "
+                        "then dispatched to the storage on the Load date."
+                    ),
+                )
+            _allowed = _allowed_ae_storages(_ov_vessel) if _ov_vessel else []
+            with _ov_r1c3:
+                _ov_storage = st.selectbox(
+                    "Storage",
+                    options=_allowed,
+                    key="ov_storage",
+                    help="Only storages this vessel is permitted to load from are shown.",
+                ) if _allowed else st.selectbox(
+                    "Storage", options=[], key="ov_storage",
+                )
+
+            # ── Second row: optional date-shift ───────────────────────────────────
+            _ov_r2c1, _ov_r2c2, _ov_r2c3 = st.columns([2, 2, 1])
+            with _ov_r2c1:
+                _ov_use_date = st.checkbox(
+                    "📅 Load on a specific date (date-shift)",
+                    key="ov_use_date",
+                    help=(
+                        "Enable to hold the vessel idle after the trigger day and "
+                        "force loading from the selected storage on the chosen date. "
+                        "The vessel waits patiently until the storage becomes idle "
+                        "within the daylight berthing window on that date."
+                    ),
+                )
+            with _ov_r2c2:
+                if _ov_use_date:
+                    try:
+                        _ov_epoch = _dt.date.fromisoformat(_start_iso_str)
+                    except Exception:
+                        _ov_epoch = _dt.date.today()
+                    _ov_load_date = st.date_input(
+                        "Load date",
+                        value=_ov_epoch + _dt.timedelta(days=int(_ov_day)),
+                        min_value=_ov_epoch + _dt.timedelta(days=int(_ov_day) - 1),
+                        max_value=_ov_epoch + _dt.timedelta(
+                            days=params.get("sim_days", 30) - 1),
+                        key="ov_load_date",
+                        help="The vessel will wait until this date then load from the storage above.",
+                    )
+                else:
+                    _ov_load_date = None
+            with _ov_r2c3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("➕ Add", key="ov_add_btn", use_container_width=True):
+                    if _ov_vessel and _ov_storage:
+                        _upd = dict(st.session_state.get("jmp_storage_overrides", {}))
+                        if _ov_use_date and _ov_load_date is not None:
+                            # Date-shift: store as dict with load_after_hour
+                            _lah = _date_to_sim_hour(_ov_load_date)
+                            _entry = {"storage": _ov_storage, "load_after_hour": _lah,
+                                      "load_date_iso": _ov_load_date.isoformat()}
+                        else:
+                            # Plain override: store as storage string
+                            _entry = _ov_storage
+                        _upd.setdefault(_ov_vessel, {})[str(int(_ov_day))] = _entry
+                        st.session_state["jmp_storage_overrides"] = _upd
+                        st.session_state.pop("_jmp_full_key", None)
+                        st.rerun()
+
+            # ── Show active overrides with remove buttons ─────────────────────────
+            if _existing_overrides:
+                st.markdown("**Active overrides** (click ✖ to remove):")
+                _ov_rows = []
+                for _ov_v, _ov_days in sorted(_existing_overrides.items()):
+                    for _ov_d, _ov_s in sorted(_ov_days.items(), key=lambda x: int(x[0])):
+                        _trig_date = (
+                            (_dt.date.fromisoformat(_start_iso_str)
+                             + _dt.timedelta(days=int(_ov_d) - 1)).strftime("%d %b")
+                            if _start_iso_str else f"Day {_ov_d}"
+                        )
+                        # Unpack entry — plain string or date-shift dict
+                        if isinstance(_ov_s, dict):
+                            _stor_label = _ov_s.get("storage", "?")
+                            _load_iso   = _ov_s.get("load_date_iso")
+                            _load_label = (
+                                _dt.date.fromisoformat(_load_iso).strftime("%d %b")
+                                if _load_iso else "?"
+                            )
+                            _ov_desc = f" → load at <b>{_stor_label}</b> on {_load_label} 📅"
+                        else:
+                            _stor_label = _ov_s
+                            _ov_desc = f" → <b>{_stor_label}</b>"
+                        _ov_rows.append((_ov_v, _ov_d, _ov_s, _stor_label, _trig_date, _ov_desc))
+                for _r_idx, (_r_v, _r_d, _r_s_raw, _r_stor, _r_date, _r_desc) in enumerate(_ov_rows):
+                    _rc1, _rc2 = st.columns([6, 1])
+                    _vc = VESSEL_COLORS.get(_r_v, "#64748b")
+                    with _rc1:
+                        st.markdown(
+                            f'<span style="background:{_vc};color:#fff;border-radius:4px;'
+                            f'padding:2px 8px;font-size:11px;font-weight:700">{_r_v}</span> '
+                            f'<span style="font-size:12px;color:#374151">'
+                            f' Day {_r_d} ({_r_date}){_r_desc}</span>',
+                            unsafe_allow_html=True,
+                        )
+                    with _rc2:
+                        if st.button("✖", key=f"ov_del_{_r_idx}", use_container_width=True):
+                            _upd2 = dict(st.session_state.get("jmp_storage_overrides", {}))
+                            if _r_v in _upd2 and str(_r_d) in _upd2[_r_v]:
+                                del _upd2[_r_v][str(_r_d)]
+                                if not _upd2[_r_v]:
+                                    del _upd2[_r_v]
+                            st.session_state["jmp_storage_overrides"] = _upd2
+                            st.session_state.pop("_jmp_full_key", None)
+                            st.rerun()
+                if st.button("🗑️ Clear all overrides", key="ov_clear_all"):
+                    st.session_state["jmp_storage_overrides"] = {}
+                    st.session_state.pop("_jmp_full_key", None)
+                    st.rerun()
+            else:
+                st.caption("No overrides active. Add one above to force a vessel reallocation.")
+
+        # ── Daughter Vessel Discharge Point Override Panel ────────────────────────
+        # Voyage-code keyed: {voyage_code: {vessel, mother, discharge_date}}
+        # If the vessel arrives at BIA before discharge_date, she waits at BIA.
+        # When the date is reached, she displaces any incumbent at that mother.
+        _ddo_state = st.session_state.get("daughter_discharge_overrides", {})
+        # Count voyage-code keyed rules (top-level entries with dict values containing "mother")
+        def _ddo_count_rules(s):
+            count = 0
+            for k, v in s.items():
+                if isinstance(v, dict) and "mother" in v:
+                    count += 1          # voyage-code keyed
+                elif isinstance(v, dict):
+                    count += len(v)     # legacy vessel/day map
+            return count
+        _ddo_count = _ddo_count_rules(_ddo_state)
+
+        # ── Build voyage-code lookup table from the most recent sim log ───────────
+        # Maps voyage_code -> {vessel, day_1based, date} for lookup and display.
+        _vcode_map: dict = {}
+        try:
+            if not log_df.empty and "VoyageCode" in log_df.columns:
+                _ls = log_df[log_df["Event"] == "LOADING_START"].copy()
+                _sim_start_iso = sim_start_date.isoformat() if hasattr(sim_start_date, "isoformat") else ""
+                for _, _lrow in _ls.iterrows():
+                    _vc_key = str(_lrow.get("VoyageCode", "")).strip()
+                    _vc_vn  = str(_lrow.get("Vessel", "")).strip()
+                    _vc_day = int(_lrow.get("Day", 1))
+                    _vc_time_str = str(_lrow.get("Time", ""))[:10]   # "YYYY-MM-DD"
+                    if _vc_key and _vc_vn and _vc_key not in _vcode_map:
+                        _vcode_map[_vc_key] = {
+                            "vessel": _vc_vn,
+                            "day":    _vc_day,
+                            "date":   _vc_time_str,
+                        }
+        except Exception:
+            pass
+
+        with st.expander(
+            "🔀 Daughter Vessel Discharge Point Override" +
+            (f" · {_ddo_count} rule(s) active" if _ddo_count else ""),
+            expanded=bool(_ddo_count),
+        ):
+            st.markdown(
+                '<div style="font-size:12px;color:#64748b;margin-bottom:10px">'
+                'Force a daughter vessel identified by its <b>Voyage Code</b> (e.g. '
+                '<code>SHK-001</code>) to discharge to a specific <b>mother vessel</b> '
+                'on a chosen <b>discharge date</b>. '
+                'If the vessel arrives at BIA early, she will wait there until the target date. '
+                'When the date is reached, she takes priority and any incumbent vessel at '
+                'that mother berth is displaced to find another slot. '
+                'This panel does <b>not</b> affect ZeeZee — use the ZeeZee panel below.</div>',
+                unsafe_allow_html=True,
             )
-        with _ov_r2c2:
-            if _ov_use_date:
-                try:
-                    _ov_epoch = _dt.date.fromisoformat(_start_iso_str)
-                except Exception:
-                    _ov_epoch = _dt.date.today()
-                _ov_load_date = st.date_input(
-                    "Load date",
-                    value=_ov_epoch + _dt.timedelta(days=int(_ov_day)),
-                    min_value=_ov_epoch + _dt.timedelta(days=int(_ov_day) - 1),
-                    max_value=_ov_epoch + _dt.timedelta(
-                        days=params.get("sim_days", 30) - 1),
-                    key="ov_load_date",
-                    help="The vessel will wait until this date then load from the storage above.",
+
+            _ddo_all_vessels = list(getattr(mod, "VESSEL_NAMES", []))
+            _ddo_mother_opts = list(getattr(mod, "MOTHER_NAMES",
+                                            ["Bryanston", "GreenEagle", "MTSanBarth"]))
+            _ddo_sim_days    = params.get("sim_days", 30)
+            _ddo_sim_start   = sim_start_date if isinstance(sim_start_date, _dt.date) else _dt.date.today()
+
+            # ── Voyage Code input (primary — resolves vessel automatically) ──────
+            if _vcode_map:
+                _info_html = (
+                    '<div style="background:#f0f9ff;border:1px solid #38bdf8;border-radius:6px;'
+                    'padding:8px 12px;margin-bottom:10px">'
+                    '<span style="font-size:11px;font-weight:700;color:#0369a1">🔖 VOYAGE CODE</span>'
+                    '<span style="font-size:11px;color:#64748b;margin-left:6px">— enter a code '
+                    f'({len(_vcode_map)} available from last run) to resolve the vessel automatically. '
+                    'Then pick the discharge date and mother vessel.</span></div>'
                 )
             else:
-                _ov_load_date = None
-        with _ov_r2c3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("➕ Add", key="ov_add_btn", use_container_width=True):
-                if _ov_vessel and _ov_storage:
-                    _upd = dict(st.session_state.get("jmp_storage_overrides", {}))
-                    if _ov_use_date and _ov_load_date is not None:
-                        # Date-shift: store as dict with load_after_hour
-                        _lah = _date_to_sim_hour(_ov_load_date)
-                        _entry = {"storage": _ov_storage, "load_after_hour": _lah,
-                                  "load_date_iso": _ov_load_date.isoformat()}
-                    else:
-                        # Plain override: store as storage string
-                        _entry = _ov_storage
-                    _upd.setdefault(_ov_vessel, {})[str(int(_ov_day))] = _entry
-                    st.session_state["jmp_storage_overrides"] = _upd
+                _info_html = (
+                    '<div style="background:#fafafa;border:1px solid #e2e8f0;border-radius:6px;'
+                    'padding:8px 12px;margin-bottom:10px">'
+                    '<span style="font-size:11px;color:#64748b">'
+                    '💡 Run the simulation once to populate voyage codes, then enter one here.</span></div>'
+                )
+            st.markdown(_info_html, unsafe_allow_html=True)
+
+            _vc_col1, _vc_col2 = st.columns([2, 4])
+            with _vc_col1:
+                _vc_input = st.text_input(
+                    "Voyage Code",
+                    value="",
+                    key="ddo_voyage_code_lookup",
+                    placeholder="e.g. SHK-001",
+                    help="7-character voyage code from the JMP (e.g. SHK-001). "
+                         "The vessel is resolved automatically from this code.",
+                ).strip().upper()
+
+            # Resolve vessel from voyage code
+            _vc_resolved_info = _vcode_map.get(_vc_input, {}) if _vc_input else {}
+            _vc_vessel        = _vc_resolved_info.get("vessel", "")
+            _vc_load_date     = _vc_resolved_info.get("date", "")   # YYYY-MM-DD of loading
+
+            with _vc_col2:
+                if _vc_input and _vc_vessel:
+                    _vc_bg = VESSEL_COLORS.get(_vc_vessel, "#64748b")
+                    # Suggest discharge date = load date + 1 day
+                    try:
+                        _sug_date = (_dt.date.fromisoformat(_vc_load_date)
+                                     + _dt.timedelta(days=1)).isoformat() if _vc_load_date else ""
+                    except Exception:
+                        _sug_date = ""
+                    st.markdown(
+                        f'<div style="padding-top:26px">'
+                        f'<span style="background:{_vc_bg};color:#fff;border-radius:4px;'
+                        f'padding:3px 9px;font-size:12px;font-weight:700">{_vc_vessel}</span>'
+                        f'<span style="font-size:12px;color:#374151;margin-left:8px">'
+                        f'loaded {_vc_load_date}'
+                        + (f' · suggested discharge <b>{_sug_date}</b>' if _sug_date else "")
+                        + '</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                elif _vc_input:
+                    st.markdown(
+                        '<div style="padding-top:26px;font-size:12px;color:#ef4444">'
+                        '⚠️ Code not found — run the simulation first.</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        '<div style="padding-top:26px;font-size:12px;color:#94a3b8">'
+                        'Enter a voyage code above to identify the vessel.</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            st.markdown("**Set discharge rule:**")
+            _ddo_c2, _ddo_c3, _ddo_c4 = st.columns([2, 2, 1])
+
+            with _ddo_c2:
+                # Discharge date — default to load-date + 1, or sim start + 1
+                try:
+                    _default_disc_date = (
+                        _dt.date.fromisoformat(_vc_load_date) + _dt.timedelta(days=1)
+                        if _vc_load_date else _ddo_sim_start + _dt.timedelta(days=1)
+                    )
+                except Exception:
+                    _default_disc_date = _ddo_sim_start + _dt.timedelta(days=1)
+                _ddo_max_date = _ddo_sim_start + _dt.timedelta(days=max(_ddo_sim_days - 1, 0))
+                _ddo_disc_date = st.date_input(
+                    "Discharge date",
+                    value=_default_disc_date,
+                    min_value=_ddo_sim_start,
+                    max_value=_ddo_max_date,
+                    key="ddo_date",
+                    help="The calendar date this vessel should berth and discharge. "
+                         "If she arrives at BIA before this date she will wait. "
+                         "On this date she takes priority and displaces any incumbent at the target mother.",
+                )
+
+            with _ddo_c3:
+                _ddo_mother = st.selectbox(
+                    "Force discharge to",
+                    options=_ddo_mother_opts,
+                    key="ddo_mother",
+                    help="Mother vessel this daughter must discharge to on the discharge date.",
+                )
+
+            with _ddo_c4:
+                st.markdown("<br>", unsafe_allow_html=True)
+                _add_disabled = not bool(_vc_vessel)   # disabled if voyage code not resolved
+                if st.button("➕ Add", key="ddo_add_btn",
+                             use_container_width=True, disabled=_add_disabled):
+                    _upd_ddo = dict(st.session_state.get("daughter_discharge_overrides", {}))
+                    _disc_iso = _ddo_disc_date.isoformat() if hasattr(_ddo_disc_date, "isoformat") else str(_ddo_disc_date)
+                    # Store voyage-code keyed
+                    _upd_ddo[_vc_input] = {
+                        "vessel":         _vc_vessel,
+                        "mother":         str(_ddo_mother),
+                        "discharge_date": _disc_iso,
+                    }
+                    st.session_state["daughter_discharge_overrides"] = _upd_ddo
                     st.session_state.pop("_jmp_full_key", None)
                     st.rerun()
 
-        # ── Show active overrides with remove buttons ─────────────────────────
-        if _existing_overrides:
-            st.markdown("**Active overrides** (click ✖ to remove):")
-            _ov_rows = []
-            for _ov_v, _ov_days in sorted(_existing_overrides.items()):
-                for _ov_d, _ov_s in sorted(_ov_days.items(), key=lambda x: int(x[0])):
-                    _trig_date = (
-                        (_dt.date.fromisoformat(_start_iso_str)
-                         + _dt.timedelta(days=int(_ov_d) - 1)).strftime("%d %b")
-                        if _start_iso_str else f"Day {_ov_d}"
-                    )
-                    # Unpack entry — plain string or date-shift dict
-                    if isinstance(_ov_s, dict):
-                        _stor_label = _ov_s.get("storage", "?")
-                        _load_iso   = _ov_s.get("load_date_iso")
-                        _load_label = (
-                            _dt.date.fromisoformat(_load_iso).strftime("%d %b")
-                            if _load_iso else "?"
-                        )
-                        _ov_desc = f" → load at <b>{_stor_label}</b> on {_load_label} 📅"
-                    else:
-                        _stor_label = _ov_s
-                        _ov_desc = f" → <b>{_stor_label}</b>"
-                    _ov_rows.append((_ov_v, _ov_d, _ov_s, _stor_label, _trig_date, _ov_desc))
-            for _r_idx, (_r_v, _r_d, _r_s_raw, _r_stor, _r_date, _r_desc) in enumerate(_ov_rows):
-                _rc1, _rc2 = st.columns([6, 1])
-                _vc = VESSEL_COLORS.get(_r_v, "#64748b")
-                with _rc1:
-                    st.markdown(
-                        f'<span style="background:{_vc};color:#fff;border-radius:4px;'
-                        f'padding:2px 8px;font-size:11px;font-weight:700">{_r_v}</span> '
-                        f'<span style="font-size:12px;color:#374151">'
-                        f' Day {_r_d} ({_r_date}){_r_desc}</span>',
-                        unsafe_allow_html=True,
-                    )
-                with _rc2:
-                    if st.button("✖", key=f"ov_del_{_r_idx}", use_container_width=True):
-                        _upd2 = dict(st.session_state.get("jmp_storage_overrides", {}))
-                        if _r_v in _upd2 and str(_r_d) in _upd2[_r_v]:
-                            del _upd2[_r_v][str(_r_d)]
-                            if not _upd2[_r_v]:
-                                del _upd2[_r_v]
-                        st.session_state["jmp_storage_overrides"] = _upd2
-                        st.session_state.pop("_jmp_full_key", None)
-                        st.rerun()
-            if st.button("🗑️ Clear all overrides", key="ov_clear_all"):
-                st.session_state["jmp_storage_overrides"] = {}
-                st.session_state.pop("_jmp_full_key", None)
-                st.rerun()
-        else:
-            st.caption("No overrides active. Add one above to force a vessel reallocation.")
+            if not _vc_vessel and _vc_input:
+                st.caption("⚠️ Enter a valid voyage code before adding a rule.")
+            elif not _vc_input:
+                st.caption("Enter a voyage code above to enable the Add button.")
 
-    # ── Daughter Vessel Discharge Point Override Panel ────────────────────────
-    # Voyage-code keyed: {voyage_code: {vessel, mother, discharge_date}}
-    # If the vessel arrives at BIA before discharge_date, she waits at BIA.
-    # When the date is reached, she displaces any incumbent at that mother.
-    _ddo_state = st.session_state.get("daughter_discharge_overrides", {})
-    # Count voyage-code keyed rules (top-level entries with dict values containing "mother")
-    def _ddo_count_rules(s):
-        count = 0
-        for k, v in s.items():
-            if isinstance(v, dict) and "mother" in v:
-                count += 1          # voyage-code keyed
-            elif isinstance(v, dict):
-                count += len(v)     # legacy vessel/day map
-        return count
-    _ddo_count = _ddo_count_rules(_ddo_state)
-
-    # ── Build voyage-code lookup table from the most recent sim log ───────────
-    # Maps voyage_code -> {vessel, day_1based, date} for lookup and display.
-    _vcode_map: dict = {}
-    try:
-        if not log_df.empty and "VoyageCode" in log_df.columns:
-            _ls = log_df[log_df["Event"] == "LOADING_START"].copy()
-            _sim_start_iso = sim_start_date.isoformat() if hasattr(sim_start_date, "isoformat") else ""
-            for _, _lrow in _ls.iterrows():
-                _vc_key = str(_lrow.get("VoyageCode", "")).strip()
-                _vc_vn  = str(_lrow.get("Vessel", "")).strip()
-                _vc_day = int(_lrow.get("Day", 1))
-                _vc_time_str = str(_lrow.get("Time", ""))[:10]   # "YYYY-MM-DD"
-                if _vc_key and _vc_vn and _vc_key not in _vcode_map:
-                    _vcode_map[_vc_key] = {
-                        "vessel": _vc_vn,
-                        "day":    _vc_day,
-                        "date":   _vc_time_str,
-                    }
-    except Exception:
-        pass
-
-    with st.expander(
-        "🔀 Daughter Vessel Discharge Point Override" +
-        (f" · {_ddo_count} rule(s) active" if _ddo_count else ""),
-        expanded=bool(_ddo_count),
-    ):
-        st.markdown(
-            '<div style="font-size:12px;color:#64748b;margin-bottom:10px">'
-            'Force a daughter vessel identified by its <b>Voyage Code</b> (e.g. '
-            '<code>SHK-001</code>) to discharge to a specific <b>mother vessel</b> '
-            'on a chosen <b>discharge date</b>. '
-            'If the vessel arrives at BIA early, she will wait there until the target date. '
-            'When the date is reached, she takes priority and any incumbent vessel at '
-            'that mother berth is displaced to find another slot. '
-            'This panel does <b>not</b> affect ZeeZee — use the ZeeZee panel below.</div>',
-            unsafe_allow_html=True,
-        )
-
-        _ddo_all_vessels = list(getattr(mod, "VESSEL_NAMES", []))
-        _ddo_mother_opts = list(getattr(mod, "MOTHER_NAMES",
-                                        ["Bryanston", "GreenEagle", "MTSanBarth"]))
-        _ddo_sim_days    = params.get("sim_days", 30)
-        _ddo_sim_start   = sim_start_date if isinstance(sim_start_date, _dt.date) else _dt.date.today()
-
-        # ── Voyage Code input (primary — resolves vessel automatically) ──────
-        if _vcode_map:
-            _info_html = (
-                '<div style="background:#f0f9ff;border:1px solid #38bdf8;border-radius:6px;'
-                'padding:8px 12px;margin-bottom:10px">'
-                '<span style="font-size:11px;font-weight:700;color:#0369a1">🔖 VOYAGE CODE</span>'
-                '<span style="font-size:11px;color:#64748b;margin-left:6px">— enter a code '
-                f'({len(_vcode_map)} available from last run) to resolve the vessel automatically. '
-                'Then pick the discharge date and mother vessel.</span></div>'
-            )
-        else:
-            _info_html = (
-                '<div style="background:#fafafa;border:1px solid #e2e8f0;border-radius:6px;'
-                'padding:8px 12px;margin-bottom:10px">'
-                '<span style="font-size:11px;color:#64748b">'
-                '💡 Run the simulation once to populate voyage codes, then enter one here.</span></div>'
-            )
-        st.markdown(_info_html, unsafe_allow_html=True)
-
-        _vc_col1, _vc_col2 = st.columns([2, 4])
-        with _vc_col1:
-            _vc_input = st.text_input(
-                "Voyage Code",
-                value="",
-                key="ddo_voyage_code_lookup",
-                placeholder="e.g. SHK-001",
-                help="7-character voyage code from the JMP (e.g. SHK-001). "
-                     "The vessel is resolved automatically from this code.",
-            ).strip().upper()
-
-        # Resolve vessel from voyage code
-        _vc_resolved_info = _vcode_map.get(_vc_input, {}) if _vc_input else {}
-        _vc_vessel        = _vc_resolved_info.get("vessel", "")
-        _vc_load_date     = _vc_resolved_info.get("date", "")   # YYYY-MM-DD of loading
-
-        with _vc_col2:
-            if _vc_input and _vc_vessel:
-                _vc_bg = VESSEL_COLORS.get(_vc_vessel, "#64748b")
-                # Suggest discharge date = load date + 1 day
-                try:
-                    _sug_date = (_dt.date.fromisoformat(_vc_load_date)
-                                 + _dt.timedelta(days=1)).isoformat() if _vc_load_date else ""
-                except Exception:
-                    _sug_date = ""
-                st.markdown(
-                    f'<div style="padding-top:26px">'
-                    f'<span style="background:{_vc_bg};color:#fff;border-radius:4px;'
-                    f'padding:3px 9px;font-size:12px;font-weight:700">{_vc_vessel}</span>'
-                    f'<span style="font-size:12px;color:#374151;margin-left:8px">'
-                    f'loaded {_vc_load_date}'
-                    + (f' · suggested discharge <b>{_sug_date}</b>' if _sug_date else "")
-                    + '</span></div>',
-                    unsafe_allow_html=True,
-                )
-            elif _vc_input:
-                st.markdown(
-                    '<div style="padding-top:26px;font-size:12px;color:#ef4444">'
-                    '⚠️ Code not found — run the simulation first.</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    '<div style="padding-top:26px;font-size:12px;color:#94a3b8">'
-                    'Enter a voyage code above to identify the vessel.</div>',
-                    unsafe_allow_html=True,
-                )
-
-        st.markdown("**Set discharge rule:**")
-        _ddo_c2, _ddo_c3, _ddo_c4 = st.columns([2, 2, 1])
-
-        with _ddo_c2:
-            # Discharge date — default to load-date + 1, or sim start + 1
-            try:
-                _default_disc_date = (
-                    _dt.date.fromisoformat(_vc_load_date) + _dt.timedelta(days=1)
-                    if _vc_load_date else _ddo_sim_start + _dt.timedelta(days=1)
-                )
-            except Exception:
-                _default_disc_date = _ddo_sim_start + _dt.timedelta(days=1)
-            _ddo_max_date = _ddo_sim_start + _dt.timedelta(days=max(_ddo_sim_days - 1, 0))
-            _ddo_disc_date = st.date_input(
-                "Discharge date",
-                value=_default_disc_date,
-                min_value=_ddo_sim_start,
-                max_value=_ddo_max_date,
-                key="ddo_date",
-                help="The calendar date this vessel should berth and discharge. "
-                     "If she arrives at BIA before this date she will wait. "
-                     "On this date she takes priority and displaces any incumbent at the target mother.",
-            )
-
-        with _ddo_c3:
-            _ddo_mother = st.selectbox(
-                "Force discharge to",
-                options=_ddo_mother_opts,
-                key="ddo_mother",
-                help="Mother vessel this daughter must discharge to on the discharge date.",
-            )
-
-        with _ddo_c4:
-            st.markdown("<br>", unsafe_allow_html=True)
-            _add_disabled = not bool(_vc_vessel)   # disabled if voyage code not resolved
-            if st.button("➕ Add", key="ddo_add_btn",
-                         use_container_width=True, disabled=_add_disabled):
-                _upd_ddo = dict(st.session_state.get("daughter_discharge_overrides", {}))
-                _disc_iso = _ddo_disc_date.isoformat() if hasattr(_ddo_disc_date, "isoformat") else str(_ddo_disc_date)
-                # Store voyage-code keyed
-                _upd_ddo[_vc_input] = {
-                    "vessel":         _vc_vessel,
-                    "mother":         str(_ddo_mother),
-                    "discharge_date": _disc_iso,
-                }
-                st.session_state["daughter_discharge_overrides"] = _upd_ddo
-                st.session_state.pop("_jmp_full_key", None)
-                st.rerun()
-
-        if not _vc_vessel and _vc_input:
-            st.caption("⚠️ Enter a valid voyage code before adding a rule.")
-        elif not _vc_input:
-            st.caption("Enter a voyage code above to enable the Add button.")
-
-        # ── Active rules table ────────────────────────────────────────────────
-        if _ddo_state:
-            st.markdown("**Active discharge point rules** (click ✖ to remove):")
-            for _rule_key, _rule_val in sorted(_ddo_state.items()):
-                # Voyage-code keyed (new format)
-                if isinstance(_rule_val, dict) and "mother" in _rule_val and "vessel" in _rule_val:
-                    _r_vc    = str(_rule_key)
-                    _r_vn    = _rule_val.get("vessel", "?")
-                    _r_mn    = _rule_val.get("mother", "?")
-                    _r_date  = _rule_val.get("discharge_date", "")
-                    _vc_bg   = VESSEL_COLORS.get(_r_vn, "#064e3b")
-                    _mc_bg   = MOTHER_COLORS.get(_r_mn, "#3b82f6")
-                    _dc1, _dc2 = st.columns([7, 1])
-                    with _dc1:
-                        st.markdown(
-                            f'<span style="background:#0f172a;color:#7dd3fc;border-radius:3px;'
-                            f'padding:2px 8px;font-size:11px;font-weight:700;font-family:monospace">'
-                            f'{_r_vc}</span>'
-                            f'<span style="background:{_vc_bg};color:#fff;border-radius:4px;'
-                            f'padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px">'
-                            f'{_r_vn}</span>'
-                            f'<span style="font-size:12px;color:#374151;margin-left:6px">'
-                            f'→ discharge to </span>'
-                            f'<span style="background:{_mc_bg}22;color:{_mc_bg};border:1px solid {_mc_bg}66;'
-                            f'border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">'
-                            f'{_r_mn}</span>'
-                            + (f'<span style="font-size:11px;color:#64748b;margin-left:6px">'
-                               f'on <b>{_r_date}</b></span>' if _r_date else "")
-                            + '<span style="font-size:10px;color:#0369a1;margin-left:6px;'
-                              'background:#e0f2fe;border-radius:3px;padding:1px 5px">'
-                              '⏸ waits if early · displaces incumbent</span>',
-                            unsafe_allow_html=True,
-                        )
-                    with _dc2:
-                        if st.button("✖", key=f"ddo_del_{_rule_key}",
-                                     use_container_width=True):
-                            _rm_ddo = dict(st.session_state.get("daughter_discharge_overrides", {}))
-                            _rm_ddo.pop(_rule_key, None)
-                            st.session_state["daughter_discharge_overrides"] = _rm_ddo
-                            st.session_state.pop("_jmp_full_key", None)
-                            st.rerun()
-                # Legacy vessel/day keyed format (backward compat display)
-                elif isinstance(_rule_val, dict):
-                    for _dk, _de in sorted(_rule_val.items(), key=lambda x: int(x[0])):
-                        _r_mn = _de.get("mother", str(_de)) if isinstance(_de, dict) else str(_de)
-                        _vc_bg = VESSEL_COLORS.get(_rule_key, "#064e3b")
+            # ── Active rules table ────────────────────────────────────────────────
+            if _ddo_state:
+                st.markdown("**Active discharge point rules** (click ✖ to remove):")
+                for _rule_key, _rule_val in sorted(_ddo_state.items()):
+                    # Voyage-code keyed (new format)
+                    if isinstance(_rule_val, dict) and "mother" in _rule_val and "vessel" in _rule_val:
+                        _r_vc    = str(_rule_key)
+                        _r_vn    = _rule_val.get("vessel", "?")
+                        _r_mn    = _rule_val.get("mother", "?")
+                        _r_date  = _rule_val.get("discharge_date", "")
+                        _vc_bg   = VESSEL_COLORS.get(_r_vn, "#064e3b")
+                        _mc_bg   = MOTHER_COLORS.get(_r_mn, "#3b82f6")
                         _dc1, _dc2 = st.columns([7, 1])
                         with _dc1:
                             st.markdown(
+                                f'<span style="background:#0f172a;color:#7dd3fc;border-radius:3px;'
+                                f'padding:2px 8px;font-size:11px;font-weight:700;font-family:monospace">'
+                                f'{_r_vc}</span>'
                                 f'<span style="background:{_vc_bg};color:#fff;border-radius:4px;'
-                                f'padding:2px 8px;font-size:11px;font-weight:700">{_rule_key}</span>'
+                                f'padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px">'
+                                f'{_r_vn}</span>'
                                 f'<span style="font-size:12px;color:#374151;margin-left:6px">'
-                                f'Day {int(_dk)+1} → {_r_mn} (legacy)</span>',
+                                f'→ discharge to </span>'
+                                f'<span style="background:{_mc_bg}22;color:{_mc_bg};border:1px solid {_mc_bg}66;'
+                                f'border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">'
+                                f'{_r_mn}</span>'
+                                + (f'<span style="font-size:11px;color:#64748b;margin-left:6px">'
+                                   f'on <b>{_r_date}</b></span>' if _r_date else "")
+                                + '<span style="font-size:10px;color:#0369a1;margin-left:6px;'
+                                  'background:#e0f2fe;border-radius:3px;padding:1px 5px">'
+                                  '⏸ waits if early · displaces incumbent</span>',
                                 unsafe_allow_html=True,
                             )
                         with _dc2:
-                            if st.button("✖", key=f"ddo_del_{_rule_key}_{_dk}",
+                            if st.button("✖", key=f"ddo_del_{_rule_key}",
                                          use_container_width=True):
                                 _rm_ddo = dict(st.session_state.get("daughter_discharge_overrides", {}))
-                                if _rule_key in _rm_ddo and isinstance(_rm_ddo[_rule_key], dict):
-                                    _rm_ddo[_rule_key].pop(str(_dk), None)
-                                    _rm_ddo[_rule_key].pop(int(_dk), None)
-                                    if not _rm_ddo[_rule_key]:
-                                        del _rm_ddo[_rule_key]
+                                _rm_ddo.pop(_rule_key, None)
                                 st.session_state["daughter_discharge_overrides"] = _rm_ddo
                                 st.session_state.pop("_jmp_full_key", None)
                                 st.rerun()
-            if st.button("🗑️ Clear all discharge rules", key="ddo_clear_all"):
-                st.session_state["daughter_discharge_overrides"] = {}
-                st.session_state.pop("_jmp_full_key", None)
-                st.rerun()
-        else:
-            st.caption("No rules active. Add one above to force a daughter vessel to a specific mother.")
-
-    # ── Discharge Override Panel (ZeeZee — third-party vessel) ───────────────
-    _zz_schedule = st.session_state.get("zeezee_schedule", [])
-
-    with st.expander(
-        "🚢 Discharge Override Panel — ZeeZee" +
-        (f" · {len(_zz_schedule)} recurring visit(s)" if _zz_schedule else ""),
-        expanded=bool(_zz_schedule),
-    ):
-        st.markdown(
-            '<div style="font-size:12px;color:#64748b;margin-bottom:10px">'
-            'Nominate <b>ZeeZee</b>, a third-party vessel, to discharge to any available '
-            'primary mother vessel at Point B on a recurring monthly date. '
-            'ZeeZee is delayed by daughter vessel queues for a maximum of '
-            '<b>2 days</b>, after which she takes priority regardless. '
-            'If no daughter queue exists, she discharges as soon as possible.</div>',
-            unsafe_allow_html=True,
-        )
-
-        # ── Add a new recurring visit ─────────────────────────────────────────
-        _zz_c1, _zz_c2, _zz_c3, _zz_c4 = st.columns([1, 2, 2, 1])
-        with _zz_c1:
-            _zz_dom = st.number_input(
-                "Day of month", min_value=1, max_value=28, value=15, step=1,
-                key="zz_dom",
-                help="Calendar day-of-month ZeeZee arrives each month (1–28)."
-            )
-        with _zz_c2:
-            _zz_vol = st.number_input(
-                "Volume (bbl)", min_value=10_000, max_value=1_000_000,
-                value=200_000, step=5_000,
-                key="zz_vol",
-                help="Cargo volume ZeeZee brings on each visit (bbl)."
-            )
-        with _zz_c3:
-            _zz_api = st.number_input(
-                "API gravity (°)", min_value=15.0, max_value=55.0,
-                value=32.0, step=0.5,
-                key="zz_api",
-                help="API gravity of ZeeZee's cargo."
-            )
-        with _zz_c4:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("➕ Add", key="zz_add_btn", use_container_width=True):
-                _new_entry = {
-                    "day_of_month": int(_zz_dom),
-                    "volume_bbl":   float(_zz_vol),
-                    "api":          float(_zz_api),
-                }
-                _upd_zz = list(st.session_state.get("zeezee_schedule", []))
-                # Prevent duplicate day_of_month entries
-                _upd_zz = [e for e in _upd_zz if e.get("day_of_month") != int(_zz_dom)]
-                _upd_zz.append(_new_entry)
-                _upd_zz.sort(key=lambda e: e["day_of_month"])
-                st.session_state["zeezee_schedule"] = _upd_zz
-                st.session_state.pop("_jmp_full_key", None)
-                st.rerun()
-
-        # ── Active schedule table with remove buttons ─────────────────────────
-        if _zz_schedule:
-            st.markdown("**Active recurring visits** (click ✖ to remove):")
-            for _zi, _ze in enumerate(_zz_schedule):
-                _zc1, _zc2 = st.columns([6, 1])
-                with _zc1:
-                    _zdom = _ze.get("day_of_month", "?")
-                    _zvol = _ze.get("volume_bbl", 0)
-                    _zapi = _ze.get("api", 0)
-                    st.markdown(
-                        f'<span style="background:#1e3a5f;color:#fff;border-radius:4px;'
-                        f'padding:2px 10px;font-size:11px;font-weight:700">ZeeZee</span> '
-                        f'<span style="font-size:12px;color:#374151">'
-                        f' Day <b>{_zdom}</b> of every month · '
-                        f'<b>{int(_zvol):,} bbl</b> @ <b>{_zapi:.1f}°</b> API'
-                        f' · 2-day daughter queue tolerance</span>',
-                        unsafe_allow_html=True,
-                    )
-                with _zc2:
-                    if st.button("✖", key=f"zz_del_{_zi}", use_container_width=True):
-                        _upd_zz2 = [e for e in st.session_state.get("zeezee_schedule", [])
-                                    if e.get("day_of_month") != _zdom]
-                        st.session_state["zeezee_schedule"] = _upd_zz2
-                        st.session_state.pop("_jmp_full_key", None)
-                        st.rerun()
-            if st.button("🗑️ Clear all ZeeZee visits", key="zz_clear_all"):
-                st.session_state["zeezee_schedule"] = []
-                st.session_state.pop("_jmp_full_key", None)
-                st.rerun()
-        else:
-            st.caption(
-                "No ZeeZee visits scheduled. Add one above to activate recurring "
-                "third-party discharge at Point B."
-            )
-
-    # ── Helper: derive plan start date ────────────────────────────────────────
-    try:
-        _jmp_start = _dt.date.fromisoformat(_start_iso_str)
-    except Exception:
-        _jmp_start = _dt.date.today()
-
-    _total_sim_days = params["sim_days"]
-    _JMP_PAGE_SIZE  = 60   # max days per JMP page (keeps table responsive)
-
-    if _total_sim_days > _JMP_PAGE_SIZE:
-        _n_pages = (_total_sim_days + _JMP_PAGE_SIZE - 1) // _JMP_PAGE_SIZE
-        _page_labels = [
-            f"Days {1 + p*_JMP_PAGE_SIZE}–{min(_total_sim_days, (p+1)*_JMP_PAGE_SIZE)}"
-            for p in range(_n_pages)
-        ]
-        _jmp_page   = st.selectbox("📅 JMP page", _page_labels, index=0, key="jmp_page_sel")
-        _page_idx   = _page_labels.index(_jmp_page)
-        _jmp_d0     = 1  + _page_idx * _JMP_PAGE_SIZE         # first day on page
-        _jmp_d1     = min(_total_sim_days, (_page_idx+1) * _JMP_PAGE_SIZE)  # last day
-    else:
-        _jmp_d0, _jmp_d1 = 1, _total_sim_days
-    _jmp_days = _jmp_d1 - _jmp_d0 + 1   # days on this page
-
-
-    # ── Build per-day data from log_df and tl_df ──────────────────────────────
-    _storage_cols = ["Chapel_bbl","JasmineS_bbl","Westmore_bbl","Duke_bbl","Starturn_bbl","PGM_bbl"]
-    _mother_cols  = ["Bryanston_bbl","GreenEagle_bbl","MTSanBarth_bbl"]
-    _storage_names = ["Chapel","JasmineS","Westmore","Duke","Starturn","PGM"]
-    _mother_names  = ["Bryanston","GreenEagle","MTSanBarth"]
-
-    def _parse_cargo(detail):
-        return _extract_cargo_bbl(detail)
-
-    def _parse_storage(detail):
-        m = re.search(r"\| (\w+):", detail)
-        return m.group(1) if m else ""
-
-    def _parse_mother(detail):
-        m = re.search(r"\| (\w+):", detail)
-        return m.group(1) if m else ""
-
-    def _kkk(bbl):
-        """Format bbl to abbreviated thousands."""
-        if bbl >= 1_000_000: return f"{bbl/1_000_000:.1f}M"
-        if bbl >= 1_000:     return f"{bbl//1000}k"
-        return str(bbl)
-
-    # Pre-index events by day.
-    # t=0 is 08:00 Day 1 — there are no Day-0 events. Kept as empty list
-    # for forward-compatibility in case a very early event slips through.
-    _day0_loadings = log_df[
-        (log_df["Day"] < 1) & (log_df["Event"] == "LOADING_START")
-    ].to_dict("records")
-
-    # Build a day→mothers_at_export lookup from EXPORT_SAIL_START → EXPORT_FENDERING_COMPLETE.
-    # The sim logs both with vessel_name = mother_name (e.g. "Bryanston").
-    # Key fix: pair each start with the FIRST fendering-complete that comes AFTER it,
-    # not by list index — because EXPORT_RETURN_ARRIVE also fires between the two events
-    # and would corrupt index-based pairing across multiple export voyages.
-    _mother_export_days = {}
-    _export_sail_df = log_df[log_df["Event"] == "EXPORT_SAIL_START"]
-    _export_end_df  = log_df[log_df["Event"] == "EXPORT_FENDERING_COMPLETE"]
-    for _emn in _export_sail_df["Vessel"].unique():
-        _sail_days = sorted(
-            _export_sail_df[_export_sail_df["Vessel"] == _emn]["Day"].tolist()
-        )
-        _fend_days = sorted(
-            _export_end_df[_export_end_df["Vessel"] == _emn]["Day"].tolist()
-        )
-        for _sd in _sail_days:
-            # Find the first fendering-complete strictly after this sail-start
-            _after = [d for d in _fend_days if d >= _sd]
-            _ed = _after[0] if _after else _total_sim_days
-            for _xd in range(int(_sd), int(_ed) + 1):
-                _mother_export_days.setdefault(_emn, set()).add(_xd)
-
-    _ev = {}
-    for _day in range(1, _total_sim_days + 1):
-        _d = log_df[log_df["Day"] == _day]
-        _day_loadings = _d[_d["Event"]=="LOADING_START"].to_dict("records")
-        # Merge Day-0 loadings into Day 1, deduplicating by vessel
-        if _day == 1:
-            _d1_vessel_set = {r["Vessel"] for r in _day_loadings}
-            _day_loadings  = _day_loadings + [
-                r for r in _day0_loadings if r["Vessel"] not in _d1_vessel_set
-            ]
-        # Mothers at export today — read directly from the Mother column
-        _mothers_away = {mn for mn, days in _mother_export_days.items() if _day in days}
-        _ev[_day] = {
-            "loadings":          _day_loadings,
-            "returning":         _d[_d["Event"]=="ARRIVED_LOADING_POINT"].to_dict("records"),
-            "fairway":           _d[_d["Event"]=="ARRIVED_FAIRWAY"].to_dict("records"),
-            "berthing_b":        _d[_d["Event"]=="BERTHING_START_B"].to_dict("records"),
-            "discharge":         _d[_d["Event"]=="DISCHARGE_START"].to_dict("records"),
-            "mothers_at_export": _mothers_away,
-        }
-        # Opening stock: 08:00 row for this day — t=0 is 08:00, so index 0 is already 08:00
-        _t = tl_df[tl_df["Day"] == _day]
-        _api_cols  = ["Chapel_api","JasmineS_api","Westmore_api","Duke_api","Starturn_api","PGM_api"]
-        _mapi_cols = ["Bryanston_api","GreenEagle_api","MTSanBarth_api"]
-        _ovf_cols  = ["Chapel_Overflow_Accum_bbl","JasmineS_Overflow_Accum_bbl",
-                      "Westmore_Overflow_Accum_bbl","Duke_Overflow_Accum_bbl",
-                      "Starturn_Overflow_Accum_bbl","PGM_Overflow_Accum_bbl"]
-        if not _t.empty:
-            _f = _t.iloc[0]
-            _ev[_day]["stocks"] = {
-                n: int(_f[c]) for n, c in zip(_storage_names, _storage_cols)
-            }
-            _ev[_day]["stocks"]["Ibom"] = int(_f["PointF_Active_Loading_bbl"]) if "PointF_Active_Loading_bbl" in _f.index else 0
-            _ev[_day]["m_stocks"] = {
-                n: int(_f[c]) for n, c in zip(_mother_names, _mother_cols)
-            }
-            _ev[_day]["stock_apis"] = {
-                n: round(float(_f[c]), 2) if c in _f.index else 0.0
-                for n, c in zip(_storage_names, _api_cols)
-            }
-            _ev[_day]["stock_apis"]["Ibom"] = 32.0
-            _ev[_day]["m_stock_apis"] = {
-                n: round(float(_f[c]), 2) if c in _f.index else 0.0
-                for n, c in zip(_mother_names, _mapi_cols)
-            }
-            # Per-storage overflow volumes at 08:00 for this day
-            _ev[_day]["overflows"] = {
-                n: int(_f[c]) if c in _f.index else 0
-                for n, c in zip(_storage_names, _ovf_cols)
-            }
-        else:
-            _ev[_day]["stocks"]      = {n: 0   for n in _storage_names}
-            _ev[_day]["stocks"]["Ibom"] = 0
-            _ev[_day]["m_stocks"]    = {n: 0   for n in _mother_names}
-            _ev[_day]["stock_apis"]  = {n: 0.0 for n in _storage_names}
-            _ev[_day]["stock_apis"]["Ibom"] = 32.0
-            _ev[_day]["m_stock_apis"]= {n: 0.0 for n in _mother_names}
-            _ev[_day]["overflows"]   = {n: 0   for n in _storage_names}
-
-    # ── CSS for the plan table ─────────────────────────────────────────────────
-    st.markdown("""
-<style>
-  .jmp-wrap{overflow-x:auto;padding:4px 0}
-  .jmp-table{border-collapse:collapse;min-width:100%;font-size:11px;
-             font-family:'Segoe UI',system-ui,sans-serif}
-  .jmp-table th{background:#1a2744;color:#ffffff;padding:5px 8px;
-                text-align:center;font-size:10px;font-weight:700;
-                letter-spacing:.04em;border:1px solid #344d80;white-space:nowrap}
-  .jmp-table th.sec-hdr-cell{background:#0f1a35;font-size:10px;
-                              letter-spacing:.06em;text-transform:uppercase}
-  .jmp-table td{padding:5px 7px;border:1px solid #e2e8f0;vertical-align:top;
-                white-space:nowrap;min-width:70px}
-  .jmp-table tr:nth-child(even) td{background:#f8f9fb}
-  .jmp-table tr:nth-child(odd)  td{background:#ffffff}
-  .jmp-date{font-weight:700;color:#1a2744;font-size:11px}
-  .jmp-stock{font-size:10px;font-weight:600;color:#374151}
-  .jmp-entry{display:inline-block;border-radius:4px;padding:2px 6px;
-             margin:1px 0;font-size:10px;font-weight:600;color:#fff;
-             white-space:nowrap;line-height:1.5}
-  .jmp-idle{color:#94a3b8;font-size:10px;font-style:italic}
-  .jmp-bia-entry{display:inline-block;border-radius:4px;padding:2px 6px;
-                 margin:1px 0;font-size:10px;font-weight:600;
-                 white-space:nowrap;line-height:1.5}
-</style>""", unsafe_allow_html=True)
-
-    # ── Column structure (mirrors the image) ──────────────────────────────────
-    # We render as HTML table for full visual control + PNG export
-    _vc = VESSEL_COLORS
-    _mc = MOTHER_COLORS
-
-    def _chip(vessel, text, bg=None):
-        c = bg or _vc.get(vessel, "#94a3b8")
-        return f'<span class="jmp-entry" style="background:{c}">{text}</span>'
-
-    def _mchip(mother, text):
-        c = _mc.get(mother, "#94a3b8")
-        return f'<span class="jmp-bia-entry" style="background:{c}22;color:{c};border:1px solid {c}66">{text}</span>'
-
-    def _idle():
-        return '<span class="jmp-idle">—</span>'
-
-    def _vcode_badge(r, mto_transient=False):
-        """Voyage-code badge rendered below a vessel chip.
-        mto_transient=True renders red background with white text (transient offload).
-        """
-        vc = str(r.get("VoyageCode", "")).strip()
-        if not vc:
-            return ""
-        if mto_transient:
-            bg, fg = "#dc2626", "#ffffff"
-        else:
-            bg, fg = "rgba(0,0,0,0.35)", "#ffffff"
-        return (
-            f'<div style="margin-top:2px">'
-            f'<span style="background:{bg};border-radius:2px;'
-            f'padding:0 5px;font-size:9px;font-family:monospace;'
-            f'letter-spacing:0.04em;color:{fg}">{vc}</span></div>'
-        )
-
-    # ── Build table HTML ───────────────────────────────────────────────────────
-    _html = ['<div class="jmp-wrap"><table class="jmp-table">']
-
-    # Header row 1 — section labels
-    _html.append(
-        '<tr>'
-        '<th rowspan="2" class="sec-hdr-cell">Date</th>'
-        '<th colspan="7" class="sec-hdr-cell">Opening Stock (bbl)</th>'
-        '<th colspan="6" class="sec-hdr-cell">Loading Plan</th>'
-        '<th colspan="2" class="sec-hdr-cell">Returning to Load</th>'
-        '<th colspan="1" class="sec-hdr-cell">Arriving BIA</th>'
-        '<th colspan="4" class="sec-hdr-cell">Discharging Plan</th>'
-        '<th style="background:#1a3a2a" class="sec-hdr-cell">MTO</th>'
-        '</tr>'
-    )
-    # Header row 2 — column names
-    _html.append(
-        '<tr>'
-        '<th>Chapel</th><th>JasmineS</th><th>Westmore</th><th>Duke</th><th>Starturn</th><th>PGM</th><th>Ibom</th>'
-        '<th>Chapel</th><th>JasmineS</th><th>Westmore</th><th>Duke</th><th>Starturn</th><th>PGM</th>'
-        '<th>Vessel &rarr; Storage</th><th>ETA</th>'
-        '<th>Vessel (ETA)</th>'
-        '<th>Bryanston</th><th>GreenEagle</th><th>MT SanBarth</th>'
-        '<th style="background:#1e3a5f">ZeeZee</th>'
-        '<th style="background:#1a3a2a">MTO<br><span style="font-size:9px;font-weight:400">Transient ↔ Discharger</span></th>'
-        '</tr>'
-    )
-
-    for _day in range(_jmp_d0, _jmp_d1 + 1):
-        _date = _jmp_start + _dt.timedelta(days=_day - 1)
-        _de = _ev[_day]
-        _stocks  = _de["stocks"]
-        _mstocks = _de["m_stocks"]
-
-        # ── Date cell ─────────────────────────────────────────────────────────
-        _date_cell = f'<td class="jmp-date">{_date.strftime("%-d %b %Y")}<br><span style="font-size:9px;color:#64748b">{_date.strftime("%a")}</span></td>'
-
-        # ── Stock cells ───────────────────────────────────────────────────────
-        # Thresholds from ops colour-code chart:
-        #   Safe (green)  < lower_limit
-        #   Borderline (amber)  lower_limit – upper_limit
-        #   Unsafe (red)  > upper_limit
-        _STOCK_THRESHOLDS = {
-            "Chapel":    (189_000, 228_000),
-            "JasmineS":  (189_000, 228_000),
-            "Westmore":  (130_000, 175_000),   # Unsafe >175k; Borderline 130k-175k; Safe <130k
-            "Ibom":      ( 70_000,  84_400),
-            "Starturn":  ( 45_500,  54_860),
-            "Duke":      ( 63_000,  76_000),   # proportional: ~70% & ~84% of 90k
-            "PGM":       ( 28_000,  33_600),   # Safe <28k · Borderline 28-33.6k · Unsafe >33.6k (~70%/84% of 40k)
-        }
-        def _scell(name):
-            v    = _stocks.get(name, 0)
-            api  = _de.get("stock_apis", {}).get(name, 0.0)
-            ovf  = _de.get("overflows", {}).get(name, 0)
-            lo, hi = _STOCK_THRESHOLDS.get(name, (189_000, 228_000))
-            if v < lo:
-                bg, col, label = "#166534", "#bbf7d0", "Safe"
-            elif v <= hi:
-                bg, col, label = "#854d0e", "#fef08a", "Borderline"
+                    # Legacy vessel/day keyed format (backward compat display)
+                    elif isinstance(_rule_val, dict):
+                        for _dk, _de in sorted(_rule_val.items(), key=lambda x: int(x[0])):
+                            _r_mn = _de.get("mother", str(_de)) if isinstance(_de, dict) else str(_de)
+                            _vc_bg = VESSEL_COLORS.get(_rule_key, "#064e3b")
+                            _dc1, _dc2 = st.columns([7, 1])
+                            with _dc1:
+                                st.markdown(
+                                    f'<span style="background:{_vc_bg};color:#fff;border-radius:4px;'
+                                    f'padding:2px 8px;font-size:11px;font-weight:700">{_rule_key}</span>'
+                                    f'<span style="font-size:12px;color:#374151;margin-left:6px">'
+                                    f'Day {int(_dk)+1} → {_r_mn} (legacy)</span>',
+                                    unsafe_allow_html=True,
+                                )
+                            with _dc2:
+                                if st.button("✖", key=f"ddo_del_{_rule_key}_{_dk}",
+                                             use_container_width=True):
+                                    _rm_ddo = dict(st.session_state.get("daughter_discharge_overrides", {}))
+                                    if _rule_key in _rm_ddo and isinstance(_rm_ddo[_rule_key], dict):
+                                        _rm_ddo[_rule_key].pop(str(_dk), None)
+                                        _rm_ddo[_rule_key].pop(int(_dk), None)
+                                        if not _rm_ddo[_rule_key]:
+                                            del _rm_ddo[_rule_key]
+                                    st.session_state["daughter_discharge_overrides"] = _rm_ddo
+                                    st.session_state.pop("_jmp_full_key", None)
+                                    st.rerun()
+                if st.button("🗑️ Clear all discharge rules", key="ddo_clear_all"):
+                    st.session_state["daughter_discharge_overrides"] = {}
+                    st.session_state.pop("_jmp_full_key", None)
+                    st.rerun()
             else:
-                bg, col, label = "#991b1b", "#fecaca", "Unsafe"
-            _api_str = f'<br><span style="color:{col};font-size:8px;opacity:0.8">API {api:.2f}°</span>' if v > 0 else ""
-            _ovf_str = (f'<span style="color:#fca5a5;font-size:8px;font-weight:700"> (+{_kkk(ovf)})</span>'
-                        if ovf > 0 else "")
-            return (
-                f'<td style="background:{bg};text-align:center">' +
-                f'<span style="color:{col};font-weight:700;font-size:10px">{_kkk(v)}</span>' +
-                _ovf_str +
-                f'<br><span style="color:{col};font-size:8px;opacity:0.85">{label}</span>' +
-                _api_str +
-                '</td>'
+                st.caption("No rules active. Add one above to force a daughter vessel to a specific mother.")
+
+        # ── Discharge Override Panel (ZeeZee — third-party vessel) ───────────────
+        _zz_schedule = st.session_state.get("zeezee_schedule", [])
+
+        with st.expander(
+            "🚢 Discharge Override Panel — ZeeZee" +
+            (f" · {len(_zz_schedule)} recurring visit(s)" if _zz_schedule else ""),
+            expanded=bool(_zz_schedule),
+        ):
+            st.markdown(
+                '<div style="font-size:12px;color:#64748b;margin-bottom:10px">'
+                'Nominate <b>ZeeZee</b>, a third-party vessel, to discharge to any available '
+                'primary mother vessel at Point B on a recurring monthly date. '
+                'ZeeZee is delayed by daughter vessel queues for a maximum of '
+                '<b>2 days</b>, after which she takes priority regardless. '
+                'If no daughter queue exists, she discharges as soon as possible.</div>',
+                unsafe_allow_html=True,
             )
 
-        _stock_cells = "".join(_scell(n) for n in _storage_names) + _scell("Ibom")
-
-        # ── Loading plan cells — one column per storage ───────────────────────
-        _active_overrides = st.session_state.get("jmp_storage_overrides", {})
-        def _lcell(storage):
-            entries = [r for r in _de["loadings"] if _parse_storage(r["Detail"])==storage]
-            if not entries: return f'<td>{_idle()}</td>'
-            chips = []
-            for r in entries:
-                _ov_entry = _active_overrides.get(r["Vessel"], {}).get(str(_day))
-                _is_forced = (
-                    _ov_entry == storage
-                    or (isinstance(_ov_entry, dict)
-                        and _ov_entry.get("storage") == storage)
+            # ── Add a new recurring visit ─────────────────────────────────────────
+            _zz_c1, _zz_c2, _zz_c3, _zz_c4 = st.columns([1, 2, 2, 1])
+            with _zz_c1:
+                _zz_dom = st.number_input(
+                    "Day of month", min_value=1, max_value=28, value=15, step=1,
+                    key="zz_dom",
+                    help="Calendar day-of-month ZeeZee arrives each month (1–28)."
                 )
-                # Voyage code badge — rendered on a new line below vessel name so
-                # the loading-plan column stays slim (not stretched by inline badges)
-                _ev_vcode = str(r.get("VoyageCode", "")).strip()
-                _vcode_sub = (
-                    f'<div style="margin-top:2px;margin-bottom:1px">'
-                    f'<span style="background:rgba(0,0,0,0.40);border-radius:2px;'
-                    f'padding:0 5px;font-size:9px;font-family:monospace;'
-                    f'letter-spacing:0.03em">{_ev_vcode}</span></div>'
-                    if _ev_vcode else ""
+            with _zz_c2:
+                _zz_vol = st.number_input(
+                    "Volume (bbl)", min_value=10_000, max_value=1_000_000,
+                    value=200_000, step=5_000,
+                    key="zz_vol",
+                    help="Cargo volume ZeeZee brings on each visit (bbl)."
                 )
-                _label = (
-                    f"{r['Vessel']} | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}"
-                    + (" 🔒" if _is_forced else "")
+            with _zz_c3:
+                _zz_api = st.number_input(
+                    "API gravity (°)", min_value=15.0, max_value=55.0,
+                    value=32.0, step=0.5,
+                    key="zz_api",
+                    help="API gravity of ZeeZee's cargo."
                 )
-                chips.append(_chip(r["Vessel"], _label) + _vcode_sub)
-            inner = "<br>".join(chips)
-            return f"<td>{inner}</td>"
+            with _zz_c4:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("➕ Add", key="zz_add_btn", use_container_width=True):
+                    _new_entry = {
+                        "day_of_month": int(_zz_dom),
+                        "volume_bbl":   float(_zz_vol),
+                        "api":          float(_zz_api),
+                    }
+                    _upd_zz = list(st.session_state.get("zeezee_schedule", []))
+                    # Prevent duplicate day_of_month entries
+                    _upd_zz = [e for e in _upd_zz if e.get("day_of_month") != int(_zz_dom)]
+                    _upd_zz.append(_new_entry)
+                    _upd_zz.sort(key=lambda e: e["day_of_month"])
+                    st.session_state["zeezee_schedule"] = _upd_zz
+                    st.session_state.pop("_jmp_full_key", None)
+                    st.rerun()
 
-        _load_cells = "".join(_lcell(n) for n in _storage_names)
-
-        # ── Returning to load ─────────────────────────────────────────────────
-        _rets = _de["returning"]
-        if _rets:
-            _ret_vessel = "<br>".join(
-                _chip(r["Vessel"], f"{r['Vessel']} → {r['Detail'].split('Arrived ')[-1].split(' —')[0]}")
-                for r in _rets
-            )
-            _ret_eta = "<br>".join(r["Time"][11:16] for r in _rets)
-        else:
-            _ret_vessel = _idle()
-            _ret_eta    = _idle()
-
-        # ── Arriving BIA ──────────────────────────────────────────────────────
-        def _eta_label(r):
-            """Build vessel ETA label with cargo volume and +N day suffix when ETA crosses midnight."""
-            _eta_time = r["Time"][11:16]
-            _eta_date_str = r["Time"][:10]
-            _cargo = _parse_cargo(r.get("Detail", ""))
-            _cargo_str = f" | {_kkk(_cargo)}" if _cargo > 0 else ""
-            try:
-                import datetime as _dtimp
-                _eta_date = _dtimp.date.fromisoformat(_eta_date_str)
-                _days_ahead = (_eta_date - _date).days
-                if _days_ahead == 1:
-                    return f"{r['Vessel']} ({_eta_time} +1d){_cargo_str}"
-                elif _days_ahead >= 2:
-                    return f"{r['Vessel']} ({_eta_time} +{_days_ahead}d){_cargo_str}"
-            except Exception:
-                pass
-            return f"{r['Vessel']} ({_eta_time}){_cargo_str}"
-
-        _fwy = _de["fairway"]
-        if _fwy:
-            _bia_arr = "<br>".join(
-                _chip(r["Vessel"], _eta_label(r)) + _vcode_badge(r)
-                for r in _fwy
-            )
-        else:
-            _bia_arr = _idle()
-
-        # ── Discharge plan cells — one column per mother ──────────────────────
-        def _dcell(mother):
-            entries  = [r for r in _de["discharge"] if _parse_mother(r["Detail"])==mother]
-            ms       = _mstocks.get(mother, 0)
-            mapi     = _de.get("m_stock_apis", {}).get(mother, 0.0)
-            _api_bit = f' · API {mapi:.2f}°' if ms > 0 else ""
-            _at_exp  = mother in _de.get("mothers_at_export", set())
-
-            def _entry_chip(r):
-                vc = str(r.get("VoyageCode", "")).strip()
-                _is_mto = vc.endswith("A") and len(vc) > 1
-                return (
-                    _chip(r["Vessel"],
-                          f"{r['Vessel']} | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}")
-                    + _vcode_badge(r, mto_transient=_is_mto)
+            # ── Active schedule table with remove buttons ─────────────────────────
+            if _zz_schedule:
+                st.markdown("**Active recurring visits** (click ✖ to remove):")
+                for _zi, _ze in enumerate(_zz_schedule):
+                    _zc1, _zc2 = st.columns([6, 1])
+                    with _zc1:
+                        _zdom = _ze.get("day_of_month", "?")
+                        _zvol = _ze.get("volume_bbl", 0)
+                        _zapi = _ze.get("api", 0)
+                        st.markdown(
+                            f'<span style="background:#1e3a5f;color:#fff;border-radius:4px;'
+                            f'padding:2px 10px;font-size:11px;font-weight:700">ZeeZee</span> '
+                            f'<span style="font-size:12px;color:#374151">'
+                            f' Day <b>{_zdom}</b> of every month · '
+                            f'<b>{int(_zvol):,} bbl</b> @ <b>{_zapi:.1f}°</b> API'
+                            f' · 2-day daughter queue tolerance</span>',
+                            unsafe_allow_html=True,
+                        )
+                    with _zc2:
+                        if st.button("✖", key=f"zz_del_{_zi}", use_container_width=True):
+                            _upd_zz2 = [e for e in st.session_state.get("zeezee_schedule", [])
+                                        if e.get("day_of_month") != _zdom]
+                            st.session_state["zeezee_schedule"] = _upd_zz2
+                            st.session_state.pop("_jmp_full_key", None)
+                            st.rerun()
+                if st.button("🗑️ Clear all ZeeZee visits", key="zz_clear_all"):
+                    st.session_state["zeezee_schedule"] = []
+                    st.session_state.pop("_jmp_full_key", None)
+                    st.rerun()
+            else:
+                st.caption(
+                    "No ZeeZee visits scheduled. Add one above to activate recurring "
+                    "third-party discharge at Point B."
                 )
 
-            if _at_exp:
-                stk = f'<span style="font-size:9px;color:#bfdbfe">Stock: {_kkk(ms)}{_api_bit}</span>'
-                _exp_label = '<div style="font-size:9px;font-weight:700;color:#fff;letter-spacing:0.06em;margin-bottom:2px">⚓ EXPORT OPS</div>'
-                if not entries:
-                    return (f'<td style="background:#1e3a5f;text-align:center;vertical-align:middle">'
-                            f'{_exp_label}{stk}</td>')
-                stk2 = f'<span style="font-size:9px;color:#bfdbfe;display:block;margin-bottom:2px">Stock: {_kkk(ms)}{_api_bit}</span>'
-                inner = "<br>".join(_entry_chip(r) for r in entries)
-                return f'<td style="background:#1e3a5f">{_exp_label}{stk2}{inner}</td>'
-            stk = f'<span style="font-size:9px;color:#94a3b8">Stock: {_kkk(ms)}{_api_bit}</span>'
-            if not entries:
-                return f'<td style="text-align:center">{_idle()}<br>{stk}</td>'
-            stk2 = f'<span style="font-size:9px;color:#64748b;display:block;margin-bottom:2px">Stock: {_kkk(ms)}{_api_bit}</span>'
-            inner = "<br>".join(_entry_chip(r) for r in entries)
-            return f"<td>{stk2}{inner}</td>"
+        # ── Helper: derive plan start date ────────────────────────────────────────
+        try:
+            _jmp_start = _dt.date.fromisoformat(_start_iso_str)
+        except Exception:
+            _jmp_start = _dt.date.today()
 
-        _disch_cells = "".join(_dcell(n) for n in _mother_names)
+        _total_sim_days = params["sim_days"]
+        _JMP_PAGE_SIZE  = 60   # max days per JMP page (keeps table responsive)
 
-        # ── ZeeZee column: show DISCHARGE_START events for this day ──────────
-        def _zz_dcell():
-            # ── FIX: slice log_df for THIS day (not the stale build-loop _d) ─
-            _day_rows = log_df[log_df["Day"] == _day]
-            _zz_entries = [
-                r for r in _de["discharge"]
-                if r.get("Vessel") == "ZeeZee"
+        if _total_sim_days > _JMP_PAGE_SIZE:
+            _n_pages = (_total_sim_days + _JMP_PAGE_SIZE - 1) // _JMP_PAGE_SIZE
+            _page_labels = [
+                f"Days {1 + p*_JMP_PAGE_SIZE}–{min(_total_sim_days, (p+1)*_JMP_PAGE_SIZE)}"
+                for p in range(_n_pages)
             ]
-            _zz_waiting = [
-                r for r in _day_rows[_day_rows["Event"].isin([
-                    "WAITING_BERTH_B", "WAITING_MOTHER_CAPACITY",
-                    "BERTHING_START_B", "HOSE_CONNECTION_START_B",
-                    "ZEEZEE_DEADLINE_OVERRIDE",
-                ])].to_dict("records")
-                if r.get("Vessel") == "ZeeZee"
-            ]
-            if not _zz_entries and not _zz_waiting:
-                # Check if ZeeZee is visiting but not yet discharging
-                _zz_present = [
-                    r for r in _day_rows[_day_rows["Vessel"] == "ZeeZee"].to_dict("records")
+            _jmp_page   = st.selectbox("📅 JMP page", _page_labels, index=0, key="jmp_page_sel")
+            _page_idx   = _page_labels.index(_jmp_page)
+            _jmp_d0     = 1  + _page_idx * _JMP_PAGE_SIZE         # first day on page
+            _jmp_d1     = min(_total_sim_days, (_page_idx+1) * _JMP_PAGE_SIZE)  # last day
+        else:
+            _jmp_d0, _jmp_d1 = 1, _total_sim_days
+        _jmp_days = _jmp_d1 - _jmp_d0 + 1   # days on this page
+
+
+        # ── Build per-day data from log_df and tl_df ──────────────────────────────
+        _storage_cols = ["Chapel_bbl","JasmineS_bbl","Westmore_bbl","Duke_bbl","Starturn_bbl","PGM_bbl"]
+        _mother_cols  = ["Bryanston_bbl","GreenEagle_bbl","MTSanBarth_bbl"]
+        _storage_names = ["Chapel","JasmineS","Westmore","Duke","Starturn","PGM"]
+        _mother_names  = ["Bryanston","GreenEagle","MTSanBarth"]
+
+        def _parse_cargo(detail):
+            return _extract_cargo_bbl(detail)
+
+        def _parse_storage(detail):
+            m = re.search(r"\| (\w+):", detail)
+            return m.group(1) if m else ""
+
+        def _parse_mother(detail):
+            m = re.search(r"\| (\w+):", detail)
+            return m.group(1) if m else ""
+
+        def _kkk(bbl):
+            """Format bbl to abbreviated thousands."""
+            if bbl >= 1_000_000: return f"{bbl/1_000_000:.1f}M"
+            if bbl >= 1_000:     return f"{bbl//1000}k"
+            return str(bbl)
+
+        # Pre-index events by day.
+        # t=0 is 08:00 Day 1 — there are no Day-0 events. Kept as empty list
+        # for forward-compatibility in case a very early event slips through.
+        _day0_loadings = log_df[
+            (log_df["Day"] < 1) & (log_df["Event"] == "LOADING_START")
+        ].to_dict("records")
+
+        # Build a day→mothers_at_export lookup from EXPORT_SAIL_START → EXPORT_FENDERING_COMPLETE.
+        # The sim logs both with vessel_name = mother_name (e.g. "Bryanston").
+        # Key fix: pair each start with the FIRST fendering-complete that comes AFTER it,
+        # not by list index — because EXPORT_RETURN_ARRIVE also fires between the two events
+        # and would corrupt index-based pairing across multiple export voyages.
+        _mother_export_days = {}
+        _export_sail_df = log_df[log_df["Event"] == "EXPORT_SAIL_START"]
+        _export_end_df  = log_df[log_df["Event"] == "EXPORT_FENDERING_COMPLETE"]
+        for _emn in _export_sail_df["Vessel"].unique():
+            _sail_days = sorted(
+                _export_sail_df[_export_sail_df["Vessel"] == _emn]["Day"].tolist()
+            )
+            _fend_days = sorted(
+                _export_end_df[_export_end_df["Vessel"] == _emn]["Day"].tolist()
+            )
+            for _sd in _sail_days:
+                # Find the first fendering-complete strictly after this sail-start
+                _after = [d for d in _fend_days if d >= _sd]
+                _ed = _after[0] if _after else _total_sim_days
+                for _xd in range(int(_sd), int(_ed) + 1):
+                    _mother_export_days.setdefault(_emn, set()).add(_xd)
+
+        _ev = {}
+        for _day in range(1, _total_sim_days + 1):
+            _d = log_df[log_df["Day"] == _day]
+            _day_loadings = _d[_d["Event"]=="LOADING_START"].to_dict("records")
+            # Merge Day-0 loadings into Day 1, deduplicating by vessel
+            if _day == 1:
+                _d1_vessel_set = {r["Vessel"] for r in _day_loadings}
+                _day_loadings  = _day_loadings + [
+                    r for r in _day0_loadings if r["Vessel"] not in _d1_vessel_set
                 ]
-                if _zz_present:
-                    _status = _zz_present[-1].get("Event", "")
-                    _lbl = {
-                        "VESSEL_JOINED":           "🚢 Arrived",
-                        "WAITING_BERTH_B":         "⏳ Waiting berth",
-                        "WAITING_MOTHER_CAPACITY": "⏳ No cap.",
-                        "ZEEZEE_DEADLINE_OVERRIDE":"⚡ Priority",
-                        "BERTHING_START_B":        "⚓ Berthing",
-                        "HOSE_CONNECTION_START_B": "🔗 Hose conn.",
-                    }.get(_status, _status)
-                    return (f'<td style="background:#f0f4ff;text-align:center">'
-                            f'<span style="font-size:10px;color:#1e3a5f;font-weight:600">'
-                            f'{_lbl}</span></td>')
-                return f'<td style="text-align:center">{_idle()}</td>'
-            if _zz_entries:
-                inner = "<br>".join(
-                    _chip("ZeeZee",
-                          f"ZeeZee | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}",
-                          bg="#1e3a5f")
-                    for r in _zz_entries
-                )
-                return f'<td style="background:#eef2ff">{inner}</td>'
-            # Waiting/berthing state — show status chip
-            _zws = _zz_waiting[-1]
-            _ev_name = _zws.get("Event", "")
-            _lbl2 = {
-                "WAITING_BERTH_B":         "⏳ Waiting berth",
-                "WAITING_MOTHER_CAPACITY": "⏳ Awaiting cap.",
-                "ZEEZEE_DEADLINE_OVERRIDE":"⚡ Priority",
-                "BERTHING_START_B":        "⚓ Berthing",
-                "HOSE_CONNECTION_START_B": "🔗 Hose conn.",
-            }.get(_ev_name, _ev_name)
-            return (f'<td style="background:#f0f4ff;text-align:center">'
-                    f'<span style="font-size:10px;color:#1e3a5f;font-weight:600">'
-                    f'{_lbl2}</span></td>')
+            # Mothers at export today — read directly from the Mother column
+            _mothers_away = {mn for mn, days in _mother_export_days.items() if _day in days}
+            _ev[_day] = {
+                "loadings":          _day_loadings,
+                "returning":         _d[_d["Event"]=="ARRIVED_LOADING_POINT"].to_dict("records"),
+                "fairway":           _d[_d["Event"]=="ARRIVED_FAIRWAY"].to_dict("records"),
+                "berthing_b":        _d[_d["Event"]=="BERTHING_START_B"].to_dict("records"),
+                "discharge":         _d[_d["Event"]=="DISCHARGE_START"].to_dict("records"),
+                "mothers_at_export": _mothers_away,
+            }
+            # Opening stock: 08:00 row for this day — t=0 is 08:00, so index 0 is already 08:00
+            _t = tl_df[tl_df["Day"] == _day]
+            _api_cols  = ["Chapel_api","JasmineS_api","Westmore_api","Duke_api","Starturn_api","PGM_api"]
+            _mapi_cols = ["Bryanston_api","GreenEagle_api","MTSanBarth_api"]
+            _ovf_cols  = ["Chapel_Overflow_Accum_bbl","JasmineS_Overflow_Accum_bbl",
+                          "Westmore_Overflow_Accum_bbl","Duke_Overflow_Accum_bbl",
+                          "Starturn_Overflow_Accum_bbl","PGM_Overflow_Accum_bbl"]
+            if not _t.empty:
+                _f = _t.iloc[0]
+                _ev[_day]["stocks"] = {
+                    n: int(_f[c]) for n, c in zip(_storage_names, _storage_cols)
+                }
+                _ev[_day]["stocks"]["Ibom"] = int(_f["PointF_Active_Loading_bbl"]) if "PointF_Active_Loading_bbl" in _f.index else 0
+                _ev[_day]["m_stocks"] = {
+                    n: int(_f[c]) for n, c in zip(_mother_names, _mother_cols)
+                }
+                _ev[_day]["stock_apis"] = {
+                    n: round(float(_f[c]), 2) if c in _f.index else 0.0
+                    for n, c in zip(_storage_names, _api_cols)
+                }
+                _ev[_day]["stock_apis"]["Ibom"] = 32.0
+                _ev[_day]["m_stock_apis"] = {
+                    n: round(float(_f[c]), 2) if c in _f.index else 0.0
+                    for n, c in zip(_mother_names, _mapi_cols)
+                }
+                # Per-storage overflow volumes at 08:00 for this day
+                _ev[_day]["overflows"] = {
+                    n: int(_f[c]) if c in _f.index else 0
+                    for n, c in zip(_storage_names, _ovf_cols)
+                }
+            else:
+                _ev[_day]["stocks"]      = {n: 0   for n in _storage_names}
+                _ev[_day]["stocks"]["Ibom"] = 0
+                _ev[_day]["m_stocks"]    = {n: 0   for n in _mother_names}
+                _ev[_day]["stock_apis"]  = {n: 0.0 for n in _storage_names}
+                _ev[_day]["stock_apis"]["Ibom"] = 32.0
+                _ev[_day]["m_stock_apis"]= {n: 0.0 for n in _mother_names}
+                _ev[_day]["overflows"]   = {n: 0   for n in _storage_names}
 
-        _disch_cells = "".join(_dcell(n) for n in _mother_names)
+        # ── CSS for the plan table ─────────────────────────────────────────────────
+        st.markdown("""
+    <style>
+      .jmp-wrap{overflow-x:auto;padding:4px 0}
+      .jmp-table{border-collapse:collapse;min-width:100%;font-size:11px;
+                 font-family:'Segoe UI',system-ui,sans-serif}
+      .jmp-table th{background:#1a2744;color:#ffffff;padding:5px 8px;
+                    text-align:center;font-size:10px;font-weight:700;
+                    letter-spacing:.04em;border:1px solid #344d80;white-space:nowrap}
+      .jmp-table th.sec-hdr-cell{background:#0f1a35;font-size:10px;
+                                  letter-spacing:.06em;text-transform:uppercase}
+      .jmp-table td{padding:5px 7px;border:1px solid #e2e8f0;vertical-align:top;
+                    white-space:nowrap;min-width:70px}
+      .jmp-table tr:nth-child(even) td{background:#f8f9fb}
+      .jmp-table tr:nth-child(odd)  td{background:#ffffff}
+      .jmp-date{font-weight:700;color:#1a2744;font-size:11px}
+      .jmp-stock{font-size:10px;font-weight:600;color:#374151}
+      .jmp-entry{display:inline-block;border-radius:4px;padding:2px 6px;
+                 margin:1px 0;font-size:10px;font-weight:600;color:#fff;
+                 white-space:nowrap;line-height:1.5}
+      .jmp-idle{color:#94a3b8;font-size:10px;font-style:italic}
+      .jmp-bia-entry{display:inline-block;border-radius:4px;padding:2px 6px;
+                     margin:1px 0;font-size:10px;font-weight:600;
+                     white-space:nowrap;line-height:1.5}
+    </style>""", unsafe_allow_html=True)
 
-        # ── MTO column: show all transient/discharger pairs for this day ───────
-        def _mto_dcell():
-            # Slice log_df for THIS day
-            _day_rows = log_df[log_df["Day"] == _day]
-            import re as _re
-            _mto_nom = _day_rows[
-                _day_rows["Event"] == "MTO_TRANSIENT_NOMINATED"
-            ].to_dict("records")
-            _mto_dis = _day_rows[
-                _day_rows["Event"] == "MTO_DISCHARGE_TO_TRANSIENT"
-            ].to_dict("records")
-            if not _mto_nom and not _mto_dis:
-                return f'<td style="text-align:center;background:#f0fdf4">{_idle()}</td>'
+        # ── Column structure (mirrors the image) ──────────────────────────────────
+        # We render as HTML table for full visual control + PNG export
+        _vc = VESSEL_COLORS
+        _mc = MOTHER_COLORS
 
-            # Group nominations by transient vessel
-            _seen_transients = {}  # transient_name -> list of nomination records
-            for _nr in _mto_nom:
-                _tn = _nr["Vessel"]
-                _seen_transients.setdefault(_tn, []).append(_nr)
+        def _chip(vessel, text, bg=None):
+            c = bg or _vc.get(vessel, "#94a3b8")
+            return f'<span class="jmp-entry" style="background:{c}">{text}</span>'
 
-            # Map discharger events back to transient by parsing Detail text
-            # Detail format: "... → {transient_name}: ..." or "... to {transient_name}: ..."
-            _dis_by_transient = {}
-            for _dr in _mto_dis:
-                _det = _dr.get("Detail", "")
-                _dt_match = (_re.search(r"→\s*(\w+)\s*:", _det)
-                             or _re.search(r"to\s+(\w+)\s*:", _det))
-                _trn_key = _dt_match.group(1) if _dt_match else None
+        def _mchip(mother, text):
+            c = _mc.get(mother, "#94a3b8")
+            return f'<span class="jmp-bia-entry" style="background:{c}22;color:{c};border:1px solid {c}66">{text}</span>'
 
-                if _trn_key:
-                    # Add to seen_transients even if there's no NOM event (startup seeds)
-                    if _trn_key not in _seen_transients:
-                        _seen_transients[_trn_key] = []  # empty nom list — dis-only block
-                    _dis_by_transient.setdefault(_trn_key, []).append(_dr)
+        def _idle():
+            return '<span class="jmp-idle">—</span>'
+
+        def _vcode_badge(r, mto_transient=False):
+            """Voyage-code badge rendered below a vessel chip.
+            mto_transient=True renders red background with white text (transient offload).
+            """
+            vc = str(r.get("VoyageCode", "")).strip()
+            if not vc:
+                return ""
+            if mto_transient:
+                bg, fg = "#dc2626", "#ffffff"
+            else:
+                bg, fg = "rgba(0,0,0,0.35)", "#ffffff"
+            return (
+                f'<div style="margin-top:2px">'
+                f'<span style="background:{bg};border-radius:2px;'
+                f'padding:0 5px;font-size:9px;font-family:monospace;'
+                f'letter-spacing:0.04em;color:{fg}">{vc}</span></div>'
+            )
+
+        # ── Build table HTML ───────────────────────────────────────────────────────
+        _html = ['<div class="jmp-wrap"><table class="jmp-table">']
+
+        # Header row 1 — section labels
+        _html.append(
+            '<tr>'
+            '<th rowspan="2" class="sec-hdr-cell">Date</th>'
+            '<th colspan="7" class="sec-hdr-cell">Opening Stock (bbl)</th>'
+            '<th colspan="6" class="sec-hdr-cell">Loading Plan</th>'
+            '<th colspan="2" class="sec-hdr-cell">Returning to Load</th>'
+            '<th colspan="1" class="sec-hdr-cell">Arriving BIA</th>'
+            '<th colspan="4" class="sec-hdr-cell">Discharging Plan</th>'
+            '<th style="background:#1a3a2a" class="sec-hdr-cell">MTO</th>'
+            '</tr>'
+        )
+        # Header row 2 — column names
+        _html.append(
+            '<tr>'
+            '<th>Chapel</th><th>JasmineS</th><th>Westmore</th><th>Duke</th><th>Starturn</th><th>PGM</th><th>Ibom</th>'
+            '<th>Chapel</th><th>JasmineS</th><th>Westmore</th><th>Duke</th><th>Starturn</th><th>PGM</th>'
+            '<th>Vessel &rarr; Storage</th><th>ETA</th>'
+            '<th>Vessel (ETA)</th>'
+            '<th>Bryanston</th><th>GreenEagle</th><th>MT SanBarth</th>'
+            '<th style="background:#1e3a5f">ZeeZee</th>'
+            '<th style="background:#1a3a2a">MTO<br><span style="font-size:9px;font-weight:400">Transient ↔ Discharger</span></th>'
+            '</tr>'
+        )
+
+        for _day in range(_jmp_d0, _jmp_d1 + 1):
+            _date = _jmp_start + _dt.timedelta(days=_day - 1)
+            _de = _ev[_day]
+            _stocks  = _de["stocks"]
+            _mstocks = _de["m_stocks"]
+
+            # ── Date cell ─────────────────────────────────────────────────────────
+            _date_cell = f'<td class="jmp-date">{_date.strftime("%-d %b %Y")}<br><span style="font-size:9px;color:#64748b">{_date.strftime("%a")}</span></td>'
+
+            # ── Stock cells ───────────────────────────────────────────────────────
+            # Thresholds from ops colour-code chart:
+            #   Safe (green)  < lower_limit
+            #   Borderline (amber)  lower_limit – upper_limit
+            #   Unsafe (red)  > upper_limit
+            _STOCK_THRESHOLDS = {
+                "Chapel":    (189_000, 228_000),
+                "JasmineS":  (189_000, 228_000),
+                "Westmore":  (130_000, 175_000),   # Unsafe >175k; Borderline 130k-175k; Safe <130k
+                "Ibom":      ( 70_000,  84_400),
+                "Starturn":  ( 45_500,  54_860),
+                "Duke":      ( 63_000,  76_000),   # proportional: ~70% & ~84% of 90k
+                "PGM":       ( 28_000,  33_600),   # Safe <28k · Borderline 28-33.6k · Unsafe >33.6k (~70%/84% of 40k)
+            }
+            def _scell(name):
+                v    = _stocks.get(name, 0)
+                api  = _de.get("stock_apis", {}).get(name, 0.0)
+                ovf  = _de.get("overflows", {}).get(name, 0)
+                lo, hi = _STOCK_THRESHOLDS.get(name, (189_000, 228_000))
+                if v < lo:
+                    bg, col, label = "#166534", "#bbf7d0", "Safe"
+                elif v <= hi:
+                    bg, col, label = "#854d0e", "#fef08a", "Borderline"
                 else:
-                    _fb = next(iter(_seen_transients), None)
-                    if _fb:
-                        _dis_by_transient.setdefault(_fb, []).append(_dr)
+                    bg, col, label = "#991b1b", "#fecaca", "Unsafe"
+                _api_str = f'<br><span style="color:{col};font-size:8px;opacity:0.8">API {api:.2f}°</span>' if v > 0 else ""
+                _ovf_str = (f'<span style="color:#fca5a5;font-size:8px;font-weight:700"> (+{_kkk(ovf)})</span>'
+                            if ovf > 0 else "")
+                return (
+                    f'<td style="background:{bg};text-align:center">' +
+                    f'<span style="color:{col};font-weight:700;font-size:10px">{_kkk(v)}</span>' +
+                    _ovf_str +
+                    f'<br><span style="color:{col};font-size:8px;opacity:0.85">{label}</span>' +
+                    _api_str +
+                    '</td>'
+                )
 
-            _blocks = []
-            for _tidx, (_tname, _tnoms) in enumerate(_seen_transients.items()):
-                _tc  = VESSEL_COLORS.get(_tname, "#334155")
-                _time = _tnoms[0]["Time"][11:16] if _tnoms else ""
-                _trn_vcode = str(_tnoms[0].get("VoyageCode", "")).strip() if _tnoms else ""
-                _trn_detail = str(_tnoms[-1].get("Detail", "")) if _tnoms else ""
-                _trn_onboard = ""
+            _stock_cells = "".join(_scell(n) for n in _storage_names) + _scell("Ibom")
+
+            # ── Loading plan cells — one column per storage ───────────────────────
+            _active_overrides = st.session_state.get("jmp_storage_overrides", {})
+            def _lcell(storage):
+                entries = [r for r in _de["loadings"] if _parse_storage(r["Detail"])==storage]
+                if not entries: return f'<td>{_idle()}</td>'
+                chips = []
+                for r in entries:
+                    _ov_entry = _active_overrides.get(r["Vessel"], {}).get(str(_day))
+                    _is_forced = (
+                        _ov_entry == storage
+                        or (isinstance(_ov_entry, dict)
+                            and _ov_entry.get("storage") == storage)
+                    )
+                    # Voyage code badge — rendered on a new line below vessel name so
+                    # the loading-plan column stays slim (not stretched by inline badges)
+                    _ev_vcode = str(r.get("VoyageCode", "")).strip()
+                    _vcode_sub = (
+                        f'<div style="margin-top:2px;margin-bottom:1px">'
+                        f'<span style="background:rgba(0,0,0,0.40);border-radius:2px;'
+                        f'padding:0 5px;font-size:9px;font-family:monospace;'
+                        f'letter-spacing:0.03em">{_ev_vcode}</span></div>'
+                        if _ev_vcode else ""
+                    )
+                    _label = (
+                        f"{r['Vessel']} | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}"
+                        + (" 🔒" if _is_forced else "")
+                    )
+                    chips.append(_chip(r["Vessel"], _label) + _vcode_sub)
+                inner = "<br>".join(chips)
+                return f"<td>{inner}</td>"
+
+            _load_cells = "".join(_lcell(n) for n in _storage_names)
+
+            # ── Returning to load ─────────────────────────────────────────────────
+            _rets = _de["returning"]
+            if _rets:
+                _ret_vessel = "<br>".join(
+                    _chip(r["Vessel"], f"{r['Vessel']} → {r['Detail'].split('Arrived ')[-1].split(' —')[0]}")
+                    for r in _rets
+                )
+                _ret_eta = "<br>".join(r["Time"][11:16] for r in _rets)
+            else:
+                _ret_vessel = _idle()
+                _ret_eta    = _idle()
+
+            # ── Arriving BIA ──────────────────────────────────────────────────────
+            def _eta_label(r):
+                """Build vessel ETA label with cargo volume and +N day suffix when ETA crosses midnight."""
+                _eta_time = r["Time"][11:16]
+                _eta_date_str = r["Time"][:10]
+                _cargo = _parse_cargo(r.get("Detail", ""))
+                _cargo_str = f" | {_kkk(_cargo)}" if _cargo > 0 else ""
                 try:
-                    _ob = _re.search(r"on-board:\s*([\d,]+)\s*bbl", _trn_detail)
-                    if _ob:
-                        _trn_onboard = f"{int(_ob.group(1).replace(',','')) // 1000}k bbl"
+                    import datetime as _dtimp
+                    _eta_date = _dtimp.date.fromisoformat(_eta_date_str)
+                    _days_ahead = (_eta_date - _date).days
+                    if _days_ahead == 1:
+                        return f"{r['Vessel']} ({_eta_time} +1d){_cargo_str}"
+                    elif _days_ahead >= 2:
+                        return f"{r['Vessel']} ({_eta_time} +{_days_ahead}d){_cargo_str}"
                 except Exception:
                     pass
-                _vcode_badge = (
-                    f'<div style="background:rgba(0,0,0,0.3);border-radius:2px;'
-                    f'padding:0 5px;font-size:9px;font-family:monospace;color:#fff;'
-                    f'display:inline-block;margin:1px 0">{_trn_vcode}</div>'
-                ) if _trn_vcode else ""
-                _onboard_badge = (
-                    f'<div style="font-size:8px;color:#166534;margin:1px 0">📦 {_trn_onboard}</div>'
-                ) if _trn_onboard else ""
-                _dis_rows = _dis_by_transient.get(_tname, [])
-                _dis_chips = "".join(
-                    f'<div style="margin:1px 0">'
-                    f'<span style="background:{VESSEL_COLORS.get(r["Vessel"],"#334155")};color:#fff;'
-                    f'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:700;'
-                    f'display:inline-block">{r["Vessel"]}</span>'
-                    + (f'<span style="display:block;background:rgba(0,0,0,0.3);border-radius:2px;'
-                       f'padding:0 4px;font-size:8px;font-family:monospace;color:#fff;margin-top:1px">'
-                       f'{str(r.get("VoyageCode","")).strip()}</span>'
-                       if str(r.get("VoyageCode","")).strip() else "")
-                    + f'</div>'
-                    for r in _dis_rows
-                ) if _dis_rows else ""
-                # Separator between multiple MTO blocks
-                _sep = '<hr style="border:none;border-top:1px solid #86efac;margin:4px 0">' if _tidx > 0 else ""
-                _blocks.append(
-                    f'{_sep}'
-                    f'<div style="font-size:9px;color:#166534;font-weight:700;margin-bottom:2px">🔄 MTO {_time}</div>'
-                    f'<span style="background:{_tc};color:#fff;border-radius:3px;'
-                    f'padding:1px 6px;font-size:10px;font-weight:700">{_tname}</span>'
-                    f'{_vcode_badge}{_onboard_badge}'
-                    + (f'<div style="font-size:9px;color:#64748b;margin:2px 0">receives from</div>'
-                       f'{_dis_chips}' if _dis_chips else "")
+                return f"{r['Vessel']} ({_eta_time}){_cargo_str}"
+
+            _fwy = _de["fairway"]
+            if _fwy:
+                _bia_arr = "<br>".join(
+                    _chip(r["Vessel"], _eta_label(r)) + _vcode_badge(r)
+                    for r in _fwy
                 )
-
-            return (
-                f'<td style="background:#ecfdf5;text-align:center">'
-                + "".join(_blocks)
-                + f'</td>'
-            )
-
-        _html.append(
-            f"<tr>{_date_cell}{_stock_cells}{_load_cells}"
-            f"<td>{_ret_vessel}</td><td style='text-align:center'>{_ret_eta}</td>"
-            f"<td>{_bia_arr}</td>"
-            f"{_disch_cells}{_zz_dcell()}{_mto_dcell()}</tr>"
-        )
-
-    _html.append("</table></div>")
-    _table_html = "\n".join(_html)
-    st.markdown(_table_html, unsafe_allow_html=True)
-
-    # ── Legend ─────────────────────────────────────────────────────────────────
-    _leg_html = '<div style="margin:10px 0 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
-    _leg_html += '<span style="font-size:11px;font-weight:700;color:#1a2744;margin-right:4px">Vessel colours:</span>'
-    for _vn, _vc2 in VESSEL_COLORS.items():
-        _leg_html += f'<span style="background:{_vc2};color:#fff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">{_vn}</span>'
-    _leg_html += '</div>'
-    st.markdown(_leg_html, unsafe_allow_html=True)
-
-    # ── PDF/HTML Download ─────────────────────────────────────────────────────
-    st.markdown("---")
-    _jmp_pg_start = _jmp_start + _dt.timedelta(days=_jmp_d0 - 1)
-    _jmp_pg_end   = _jmp_start + _dt.timedelta(days=_jmp_d1 - 1)
-    if _total_sim_days > _JMP_PAGE_SIZE:
-        _jmp_title_str = (
-            f"Journey Management Plan — {_jmp_pg_start.strftime('%d %b %Y')} to "
-            f"{_jmp_pg_end.strftime('%d %b %Y')} "
-            f"(Days {_jmp_d0}–{_jmp_d1} of {_total_sim_days})"
-        )
-    else:
-        _jmp_title_str = f"Journey Management Plan — {_jmp_start.strftime('%d %b %Y')} ({_total_sim_days} days)"
-
-    # ── Build FULL table HTML (all days, regardless of current page view) ──────
-    # Guard: only rebuild when the simulation changes, not on every widget
-    # interaction. A 16-char hash of (start_date, sim_days, export_day_sets)
-    # is stored in session_state alongside the finished HTML.
-    _jmp_rebuild_key = hashlib.md5(
-        f"{_jmp_start.isoformat()}:{_total_sim_days}:"
-        f"{json.dumps({k: sorted(v) for k, v in _mother_export_days.items()}, sort_keys=True)}"
-        .encode()
-    ).hexdigest()[:16]
-    _cached_full_html   = st.session_state.get("_jmp_full_html")
-    _cached_full_key    = st.session_state.get("_jmp_full_key")
-    _cached_full_csv    = st.session_state.get("_jmp_full_csv")
-    _full_run_html_ready = (_cached_full_html is not None
-                            and _cached_full_key == _jmp_rebuild_key)
-
-    _full_title_str = (
-        f"Journey Management Plan — {_jmp_start.strftime('%d %b %Y')} to "
-        f"{(_jmp_start + _dt.timedelta(days=_total_sim_days - 1)).strftime('%d %b %Y')} "
-        f"({_total_sim_days} days)"
-    )
-    _full_rows_html = []
-    for _fd in range(1, _total_sim_days + 1):
-        _fdate = _jmp_start + _dt.timedelta(days=_fd - 1)
-        _fde   = _ev[_fd]
-        _fstocks  = _fde["stocks"]
-        _fmstocks = _fde["m_stocks"]
-
-        _fdate_cell = (
-            f'<td class="jmp-date">{_fdate.strftime("%-d %b %Y")}<br>'
-            f'<span style="font-size:9px;color:#64748b">{_fdate.strftime("%a")}</span></td>'
-        )
-
-        # Stock cells — exact same logic as main renderer (_scell)
-        _FSTOCK_THRESHOLDS = {
-            "Chapel":    (189_000, 228_000),
-            "JasmineS":  (189_000, 228_000),
-            "Westmore":  (130_000, 175_000),   # Unsafe >175k; Borderline 130k-175k; Safe <130k
-            "Ibom":      ( 70_000,  84_400),
-            "Starturn":  ( 45_500,  54_860),
-            "Duke":      ( 63_000,  76_000),
-            "PGM":       ( 28_000,  33_600),   # Safe <28k · Borderline 28-33.6k · Unsafe >33.6k (~70%/84% of 40k)
-        }
-        def _fscell(name):
-            v    = _fstocks.get(name, 0)
-            api  = _fde.get("stock_apis", {}).get(name, 0.0)
-            ovf  = _fde.get("overflows", {}).get(name, 0)
-            lo, hi = _FSTOCK_THRESHOLDS.get(name, (189_000, 228_000))
-            if v < lo:
-                bg, col, label = "#166534", "#bbf7d0", "Safe"
-            elif v <= hi:
-                bg, col, label = "#854d0e", "#fef08a", "Borderline"
             else:
-                bg, col, label = "#991b1b", "#fecaca", "Unsafe"
-            _api_str = f'<br><span style="color:{col};font-size:8px;opacity:0.8">API {api:.2f}°</span>' if v > 0 else ""
-            _ovf_str = (f'<span style="color:#fca5a5;font-size:8px;font-weight:700"> (+{_kkk(ovf)})</span>'
-                        if ovf > 0 else "")
-            return (
-                f'<td style="background:{bg};text-align:center">' +
-                f'<span style="color:{col};font-weight:700;font-size:10px">{_kkk(v)}</span>' +
-                _ovf_str +
-                f'<br><span style="color:{col};font-size:8px;opacity:0.85">{label}</span>' +
-                _api_str + '</td>'
-            )
-        _fstock_cells = "".join(_fscell(n) for n in _storage_names) + _fscell("Ibom")
+                _bia_arr = _idle()
 
-        # Loading cells — exact same logic as main renderer (_lcell)
-        _factive_ov = st.session_state.get("jmp_storage_overrides", {})
-        def _fload(name):
-            entries = [r for r in _fde["loadings"] if _parse_storage(r["Detail"]) == name]
-            if not entries:
-                return f'<td>{_idle()}</td>'
-            chips = []
-            for r in entries:
-                _ov_fentry = _factive_ov.get(r["Vessel"], {}).get(str(_fd))
-                _f_forced = (
-                    _ov_fentry == name
-                    or (isinstance(_ov_fentry, dict)
-                        and _ov_fentry.get("storage") == name)
-                )
-                _f_label = (
-                    f"{r['Vessel']} | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}"
-                    + (" 🔒" if _f_forced else "")
-                )
-                _f_vcode = str(r.get("VoyageCode", "")).strip()
-                _f_vcode_sub = (
-                    f'<div style="margin-top:2px;margin-bottom:1px">'
-                    f'<span style="background:rgba(0,0,0,0.40);border-radius:2px;'
-                    f'padding:0 5px;font-size:9px;font-family:monospace;'
-                    f'letter-spacing:0.03em">{_f_vcode}</span></div>'
-                    if _f_vcode else ""
-                )
-                chips.append(_chip(r["Vessel"], _f_label) + _f_vcode_sub)
-            inner = "<br>".join(chips)
-            return f"<td>{inner}</td>"
-        _fload_cells = "".join(_fload(n) for n in _storage_names)
+            # ── Discharge plan cells — one column per mother ──────────────────────
+            def _dcell(mother):
+                entries  = [r for r in _de["discharge"] if _parse_mother(r["Detail"])==mother]
+                ms       = _mstocks.get(mother, 0)
+                mapi     = _de.get("m_stock_apis", {}).get(mother, 0.0)
+                _api_bit = f' · API {mapi:.2f}°' if ms > 0 else ""
+                _at_exp  = mother in _de.get("mothers_at_export", set())
 
-        # Returning vessel
-        _fret = _fde["returning"]
-        _fret_vessel = "<br>".join(
-            _chip(r["Vessel"], f"{r['Vessel']} → {r['Detail'].split('Arrived ')[-1].split(' —')[0]}")
-            for r in _fret
-        ) if _fret else _idle()
-        _fret_eta = "<br>".join(r["Time"][11:16] for r in _fret) if _fret else _idle()
+                def _entry_chip(r):
+                    vc = str(r.get("VoyageCode", "")).strip()
+                    _is_mto = vc.endswith("A") and len(vc) > 1
+                    return (
+                        _chip(r["Vessel"],
+                              f"{r['Vessel']} | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}")
+                        + _vcode_badge(r, mto_transient=_is_mto)
+                    )
 
-        def _feta_label(r):
-            """Full-run ETA label with cargo volume and +N day suffix when ETA crosses midnight."""
-            _eta_time = r["Time"][11:16]
-            _eta_date_str = r["Time"][:10]
-            _cargo = _parse_cargo(r.get("Detail", ""))
-            _cargo_str = f" | {_kkk(_cargo)}" if _cargo > 0 else ""
-            try:
-                import datetime as _dtimp2
-                _feta_date = _dtimp2.date.fromisoformat(_eta_date_str)
-                _fdate = _jmp_start + _dt.timedelta(days=_fd - 1)
-                _fdays_ahead = (_feta_date - _fdate).days
-                if _fdays_ahead == 1:
-                    return f"{r['Vessel']} ({_eta_time} +1d){_cargo_str}"
-                elif _fdays_ahead >= 2:
-                    return f"{r['Vessel']} ({_eta_time} +{_fdays_ahead}d){_cargo_str}"
-            except Exception:
-                pass
-            return f"{r['Vessel']} ({_eta_time}){_cargo_str}"
-
-        _ffwy = _fde["fairway"]
-        _fbia_arr = "<br>".join(
-            _chip(r["Vessel"], _feta_label(r)) + _vcode_badge(r)
-            for r in _ffwy
-        ) if _ffwy else _idle()
-
-        # Discharge cells
-        def _fdcell(mother):
-            entries  = [r for r in _fde["discharge"] if _parse_mother(r["Detail"]) == mother]
-            ms       = _fmstocks.get(mother, 0)
-            mapi     = _fde.get("m_stock_apis", {}).get(mother, 0.0)
-            _api_bit = f' · API {mapi:.2f}°' if ms > 0 else ""
-            _at_exp  = mother in _fde.get("mothers_at_export", set())
-
-            def _fentry_chip(r):
-                vc = str(r.get("VoyageCode", "")).strip()
-                _is_mto = vc.endswith("A") and len(vc) > 1
-                return (
-                    _chip(r["Vessel"],
-                          f"{r['Vessel']} | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}")
-                    + _vcode_badge(r, mto_transient=_is_mto)
-                )
-
-            if _at_exp:
-                stk = f'<span style="font-size:9px;color:#bfdbfe">Stock: {_kkk(ms)}{_api_bit}</span>'
-                _exp_label = '<div style="font-size:9px;font-weight:700;color:#fff;letter-spacing:0.06em;margin-bottom:2px">⚓ EXPORT OPS</div>'
+                if _at_exp:
+                    stk = f'<span style="font-size:9px;color:#bfdbfe">Stock: {_kkk(ms)}{_api_bit}</span>'
+                    _exp_label = '<div style="font-size:9px;font-weight:700;color:#fff;letter-spacing:0.06em;margin-bottom:2px">⚓ EXPORT OPS</div>'
+                    if not entries:
+                        return (f'<td style="background:#1e3a5f;text-align:center;vertical-align:middle">'
+                                f'{_exp_label}{stk}</td>')
+                    stk2 = f'<span style="font-size:9px;color:#bfdbfe;display:block;margin-bottom:2px">Stock: {_kkk(ms)}{_api_bit}</span>'
+                    inner = "<br>".join(_entry_chip(r) for r in entries)
+                    return f'<td style="background:#1e3a5f">{_exp_label}{stk2}{inner}</td>'
+                stk = f'<span style="font-size:9px;color:#94a3b8">Stock: {_kkk(ms)}{_api_bit}</span>'
                 if not entries:
-                    return (f'<td style="background:#1e3a5f;text-align:center;vertical-align:middle">'
-                            f'{_exp_label}{stk}</td>')
-                stk2 = f'<span style="font-size:9px;color:#bfdbfe;display:block;margin-bottom:2px">Stock: {_kkk(ms)}{_api_bit}</span>'
-                inner = "<br>".join(_fentry_chip(r) for r in entries)
-                return f'<td style="background:#1e3a5f">{_exp_label}{stk2}{inner}</td>'
-            stk = f'<span style="font-size:9px;color:#94a3b8">Stock: {_kkk(ms)}{_api_bit}</span>'
-            if not entries:
-                return f'<td style="text-align:center">{_idle()}<br>{stk}</td>'
-            stk2 = f'<span style="font-size:9px;color:#64748b;display:block;margin-bottom:2px">Stock: {_kkk(ms)}{_api_bit}</span>'
-            inner = "<br>".join(_fentry_chip(r) for r in entries)
-            return f"<td>{stk2}{inner}</td>"
-        _fdisch_cells = "".join(_fdcell(n) for n in _mother_names)
+                    return f'<td style="text-align:center">{_idle()}<br>{stk}</td>'
+                stk2 = f'<span style="font-size:9px;color:#64748b;display:block;margin-bottom:2px">Stock: {_kkk(ms)}{_api_bit}</span>'
+                inner = "<br>".join(_entry_chip(r) for r in entries)
+                return f"<td>{stk2}{inner}</td>"
 
-        # ── ZeeZee column for full-run / PDF render ───────────────────────────
-        def _zz_fdcell():
-            _fzz_entries = [
-                r for r in _fde["discharge"]
-                if r.get("Vessel") == "ZeeZee"
-            ]
-            _fd_day_rows = log_df[log_df["Day"] == _fd]
-            _fzz_waiting = [
-                r for r in _fd_day_rows[
-                    _fd_day_rows["Event"].isin([
+            _disch_cells = "".join(_dcell(n) for n in _mother_names)
+
+            # ── ZeeZee column: show DISCHARGE_START events for this day ──────────
+            def _zz_dcell():
+                # ── FIX: slice log_df for THIS day (not the stale build-loop _d) ─
+                _day_rows = log_df[log_df["Day"] == _day]
+                _zz_entries = [
+                    r for r in _de["discharge"]
+                    if r.get("Vessel") == "ZeeZee"
+                ]
+                _zz_waiting = [
+                    r for r in _day_rows[_day_rows["Event"].isin([
                         "WAITING_BERTH_B", "WAITING_MOTHER_CAPACITY",
                         "BERTHING_START_B", "HOSE_CONNECTION_START_B",
                         "ZEEZEE_DEADLINE_OVERRIDE",
-                    ])
-                ].to_dict("records")
-                if r.get("Vessel") == "ZeeZee"
-            ]
-            if not _fzz_entries and not _fzz_waiting:
-                _fzz_present = [
-                    r for r in _fd_day_rows[
-                        _fd_day_rows["Vessel"] == "ZeeZee"
-                    ].to_dict("records")
+                    ])].to_dict("records")
+                    if r.get("Vessel") == "ZeeZee"
                 ]
-                if _fzz_present:
-                    _fstatus = _fzz_present[-1].get("Event", "")
-                    _flbl = {
-                        "VESSEL_JOINED":           "🚢 Arrived",
-                        "WAITING_BERTH_B":         "⏳ Waiting",
-                        "WAITING_MOTHER_CAPACITY": "⏳ No cap.",
-                        "ZEEZEE_DEADLINE_OVERRIDE":"⚡ Priority",
-                        "BERTHING_START_B":        "⚓ Berthing",
-                        "HOSE_CONNECTION_START_B": "🔗 Hose conn.",
-                    }.get(_fstatus, _fstatus)
-                    return (f'<td style="background:#f0f4ff;text-align:center">'
-                            f'<span style="font-size:10px;color:#1e3a5f;font-weight:600">'
-                            f'{_flbl}</span></td>')
-                return f'<td style="text-align:center">{_idle()}</td>'
-            if _fzz_entries:
-                inner = "<br>".join(
-                    _chip("ZeeZee",
-                          f"ZeeZee | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}",
-                          bg="#1e3a5f")
-                    for r in _fzz_entries
+                if not _zz_entries and not _zz_waiting:
+                    # Check if ZeeZee is visiting but not yet discharging
+                    _zz_present = [
+                        r for r in _day_rows[_day_rows["Vessel"] == "ZeeZee"].to_dict("records")
+                    ]
+                    if _zz_present:
+                        _status = _zz_present[-1].get("Event", "")
+                        _lbl = {
+                            "VESSEL_JOINED":           "🚢 Arrived",
+                            "WAITING_BERTH_B":         "⏳ Waiting berth",
+                            "WAITING_MOTHER_CAPACITY": "⏳ No cap.",
+                            "ZEEZEE_DEADLINE_OVERRIDE":"⚡ Priority",
+                            "BERTHING_START_B":        "⚓ Berthing",
+                            "HOSE_CONNECTION_START_B": "🔗 Hose conn.",
+                        }.get(_status, _status)
+                        return (f'<td style="background:#f0f4ff;text-align:center">'
+                                f'<span style="font-size:10px;color:#1e3a5f;font-weight:600">'
+                                f'{_lbl}</span></td>')
+                    return f'<td style="text-align:center">{_idle()}</td>'
+                if _zz_entries:
+                    inner = "<br>".join(
+                        _chip("ZeeZee",
+                              f"ZeeZee | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}",
+                              bg="#1e3a5f")
+                        for r in _zz_entries
+                    )
+                    return f'<td style="background:#eef2ff">{inner}</td>'
+                # Waiting/berthing state — show status chip
+                _zws = _zz_waiting[-1]
+                _ev_name = _zws.get("Event", "")
+                _lbl2 = {
+                    "WAITING_BERTH_B":         "⏳ Waiting berth",
+                    "WAITING_MOTHER_CAPACITY": "⏳ Awaiting cap.",
+                    "ZEEZEE_DEADLINE_OVERRIDE":"⚡ Priority",
+                    "BERTHING_START_B":        "⚓ Berthing",
+                    "HOSE_CONNECTION_START_B": "🔗 Hose conn.",
+                }.get(_ev_name, _ev_name)
+                return (f'<td style="background:#f0f4ff;text-align:center">'
+                        f'<span style="font-size:10px;color:#1e3a5f;font-weight:600">'
+                        f'{_lbl2}</span></td>')
+
+            _disch_cells = "".join(_dcell(n) for n in _mother_names)
+
+            # ── MTO column: show all transient/discharger pairs for this day ───────
+            def _mto_dcell():
+                # Slice log_df for THIS day
+                _day_rows = log_df[log_df["Day"] == _day]
+                import re as _re
+                _mto_nom = _day_rows[
+                    _day_rows["Event"] == "MTO_TRANSIENT_NOMINATED"
+                ].to_dict("records")
+                _mto_dis = _day_rows[
+                    _day_rows["Event"] == "MTO_DISCHARGE_TO_TRANSIENT"
+                ].to_dict("records")
+                if not _mto_nom and not _mto_dis:
+                    return f'<td style="text-align:center;background:#f0fdf4">{_idle()}</td>'
+
+                # Group nominations by transient vessel
+                _seen_transients = {}  # transient_name -> list of nomination records
+                for _nr in _mto_nom:
+                    _tn = _nr["Vessel"]
+                    _seen_transients.setdefault(_tn, []).append(_nr)
+
+                # Map discharger events back to transient by parsing Detail text
+                # Detail format: "... → {transient_name}: ..." or "... to {transient_name}: ..."
+                _dis_by_transient = {}
+                for _dr in _mto_dis:
+                    _det = _dr.get("Detail", "")
+                    _dt_match = (_re.search(r"→\s*(\w+)\s*:", _det)
+                                 or _re.search(r"to\s+(\w+)\s*:", _det))
+                    _trn_key = _dt_match.group(1) if _dt_match else None
+
+                    if _trn_key:
+                        # Add to seen_transients even if there's no NOM event (startup seeds)
+                        if _trn_key not in _seen_transients:
+                            _seen_transients[_trn_key] = []  # empty nom list — dis-only block
+                        _dis_by_transient.setdefault(_trn_key, []).append(_dr)
+                    else:
+                        _fb = next(iter(_seen_transients), None)
+                        if _fb:
+                            _dis_by_transient.setdefault(_fb, []).append(_dr)
+
+                _blocks = []
+                for _tidx, (_tname, _tnoms) in enumerate(_seen_transients.items()):
+                    _tc  = VESSEL_COLORS.get(_tname, "#334155")
+                    _time = _tnoms[0]["Time"][11:16] if _tnoms else ""
+                    _trn_vcode = str(_tnoms[0].get("VoyageCode", "")).strip() if _tnoms else ""
+                    _trn_detail = str(_tnoms[-1].get("Detail", "")) if _tnoms else ""
+                    _trn_onboard = ""
+                    try:
+                        _ob = _re.search(r"on-board:\s*([\d,]+)\s*bbl", _trn_detail)
+                        if _ob:
+                            _trn_onboard = f"{int(_ob.group(1).replace(',','')) // 1000}k bbl"
+                    except Exception:
+                        pass
+                    _vcode_badge = (
+                        f'<div style="background:rgba(0,0,0,0.3);border-radius:2px;'
+                        f'padding:0 5px;font-size:9px;font-family:monospace;color:#fff;'
+                        f'display:inline-block;margin:1px 0">{_trn_vcode}</div>'
+                    ) if _trn_vcode else ""
+                    _onboard_badge = (
+                        f'<div style="font-size:8px;color:#166534;margin:1px 0">📦 {_trn_onboard}</div>'
+                    ) if _trn_onboard else ""
+                    _dis_rows = _dis_by_transient.get(_tname, [])
+                    _dis_chips = "".join(
+                        f'<div style="margin:1px 0">'
+                        f'<span style="background:{VESSEL_COLORS.get(r["Vessel"],"#334155")};color:#fff;'
+                        f'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:700;'
+                        f'display:inline-block">{r["Vessel"]}</span>'
+                        + (f'<span style="display:block;background:rgba(0,0,0,0.3);border-radius:2px;'
+                           f'padding:0 4px;font-size:8px;font-family:monospace;color:#fff;margin-top:1px">'
+                           f'{str(r.get("VoyageCode","")).strip()}</span>'
+                           if str(r.get("VoyageCode","")).strip() else "")
+                        + f'</div>'
+                        for r in _dis_rows
+                    ) if _dis_rows else ""
+                    # Separator between multiple MTO blocks
+                    _sep = '<hr style="border:none;border-top:1px solid #86efac;margin:4px 0">' if _tidx > 0 else ""
+                    _blocks.append(
+                        f'{_sep}'
+                        f'<div style="font-size:9px;color:#166534;font-weight:700;margin-bottom:2px">🔄 MTO {_time}</div>'
+                        f'<span style="background:{_tc};color:#fff;border-radius:3px;'
+                        f'padding:1px 6px;font-size:10px;font-weight:700">{_tname}</span>'
+                        f'{_vcode_badge}{_onboard_badge}'
+                        + (f'<div style="font-size:9px;color:#64748b;margin:2px 0">receives from</div>'
+                           f'{_dis_chips}' if _dis_chips else "")
+                    )
+
+                return (
+                    f'<td style="background:#ecfdf5;text-align:center">'
+                    + "".join(_blocks)
+                    + f'</td>'
                 )
-                return f'<td style="background:#eef2ff">{inner}</td>'
-            _fzws = _fzz_waiting[-1]
-            _flbl2 = {
-                "WAITING_BERTH_B":         "⏳ Waiting",
-                "WAITING_MOTHER_CAPACITY": "⏳ Awaiting cap.",
-                "ZEEZEE_DEADLINE_OVERRIDE":"⚡ Priority",
-                "BERTHING_START_B":        "⚓ Berthing",
-                "HOSE_CONNECTION_START_B": "🔗 Hose conn.",
-            }.get(_fzws.get("Event", ""), _fzws.get("Event", ""))
-            return (f'<td style="background:#f0f4ff;text-align:center">'
-                    f'<span style="font-size:10px;color:#1e3a5f;font-weight:600">'
-                    f'{_flbl2}</span></td>')
 
-        _fdisch_cells = "".join(_fdcell(n) for n in _mother_names)
+            _html.append(
+                f"<tr>{_date_cell}{_stock_cells}{_load_cells}"
+                f"<td>{_ret_vessel}</td><td style='text-align:center'>{_ret_eta}</td>"
+                f"<td>{_bia_arr}</td>"
+                f"{_disch_cells}{_zz_dcell()}{_mto_dcell()}</tr>"
+            )
 
-        # ── MTO column for full-run / PDF render ──────────────────────────────
-        def _mto_fdcell():
-            import re as _re_fd
-            _fd_day_rows = log_df[log_df["Day"] == _fd]
-            _fmto_nom = _fd_day_rows[
-                _fd_day_rows["Event"] == "MTO_TRANSIENT_NOMINATED"
-            ].to_dict("records")
-            _fmto_dis = _fd_day_rows[
-                _fd_day_rows["Event"] == "MTO_DISCHARGE_TO_TRANSIENT"
-            ].to_dict("records")
-            if not _fmto_nom and not _fmto_dis:
-                return f'<td style="text-align:center;background:#f0fdf4">{_idle()}</td>'
+        _html.append("</table></div>")
+        _table_html = "\n".join(_html)
+        st.markdown(_table_html, unsafe_allow_html=True)
 
-            # Group nominations by transient vessel
-            _fseen_transients = {}
-            for _fnr in _fmto_nom:
-                _ftn = _fnr["Vessel"]
-                _fseen_transients.setdefault(_ftn, []).append(_fnr)
+        # ── Legend ─────────────────────────────────────────────────────────────────
+        _leg_html = '<div style="margin:10px 0 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
+        _leg_html += '<span style="font-size:11px;font-weight:700;color:#1a2744;margin-right:4px">Vessel colours:</span>'
+        for _vn, _vc2 in VESSEL_COLORS.items():
+            _leg_html += f'<span style="background:{_vc2};color:#fff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">{_vn}</span>'
+        _leg_html += '</div>'
+        st.markdown(_leg_html, unsafe_allow_html=True)
 
-            # Map discharger events back to transient by parsing Detail text
-            _fdis_by_transient = {}
-            for _fdr in _fmto_dis:
-                _fdt_match = _re_fd.search(r"to\s+(\w+):", _fdr.get("Detail", ""))
-                _ftrn_key = _fdt_match.group(1) if _fdt_match else None
-                if _ftrn_key and _ftrn_key in _fseen_transients:
-                    _fdis_by_transient.setdefault(_ftrn_key, []).append(_fdr)
+        # ── PDF/HTML Download ─────────────────────────────────────────────────────
+        st.markdown("---")
+        _jmp_pg_start = _jmp_start + _dt.timedelta(days=_jmp_d0 - 1)
+        _jmp_pg_end   = _jmp_start + _dt.timedelta(days=_jmp_d1 - 1)
+        if _total_sim_days > _JMP_PAGE_SIZE:
+            _jmp_title_str = (
+                f"Journey Management Plan — {_jmp_pg_start.strftime('%d %b %Y')} to "
+                f"{_jmp_pg_end.strftime('%d %b %Y')} "
+                f"(Days {_jmp_d0}–{_jmp_d1} of {_total_sim_days})"
+            )
+        else:
+            _jmp_title_str = f"Journey Management Plan — {_jmp_start.strftime('%d %b %Y')} ({_total_sim_days} days)"
+
+        # ── Build FULL table HTML (all days, regardless of current page view) ──────
+        # Guard: only rebuild when the simulation changes, not on every widget
+        # interaction. A 16-char hash of (start_date, sim_days, export_day_sets)
+        # is stored in session_state alongside the finished HTML.
+        _jmp_rebuild_key = hashlib.md5(
+            f"{_jmp_start.isoformat()}:{_total_sim_days}:"
+            f"{json.dumps({k: sorted(v) for k, v in _mother_export_days.items()}, sort_keys=True)}"
+            .encode()
+        ).hexdigest()[:16]
+        _cached_full_html   = st.session_state.get("_jmp_full_html")
+        _cached_full_key    = st.session_state.get("_jmp_full_key")
+        _cached_full_csv    = st.session_state.get("_jmp_full_csv")
+        _full_run_html_ready = (_cached_full_html is not None
+                                and _cached_full_key == _jmp_rebuild_key)
+
+        _full_title_str = (
+            f"Journey Management Plan — {_jmp_start.strftime('%d %b %Y')} to "
+            f"{(_jmp_start + _dt.timedelta(days=_total_sim_days - 1)).strftime('%d %b %Y')} "
+            f"({_total_sim_days} days)"
+        )
+        _full_rows_html = []
+        for _fd in range(1, _total_sim_days + 1):
+            _fdate = _jmp_start + _dt.timedelta(days=_fd - 1)
+            _fde   = _ev[_fd]
+            _fstocks  = _fde["stocks"]
+            _fmstocks = _fde["m_stocks"]
+
+            _fdate_cell = (
+                f'<td class="jmp-date">{_fdate.strftime("%-d %b %Y")}<br>'
+                f'<span style="font-size:9px;color:#64748b">{_fdate.strftime("%a")}</span></td>'
+            )
+
+            # Stock cells — exact same logic as main renderer (_scell)
+            _FSTOCK_THRESHOLDS = {
+                "Chapel":    (189_000, 228_000),
+                "JasmineS":  (189_000, 228_000),
+                "Westmore":  (130_000, 175_000),   # Unsafe >175k; Borderline 130k-175k; Safe <130k
+                "Ibom":      ( 70_000,  84_400),
+                "Starturn":  ( 45_500,  54_860),
+                "Duke":      ( 63_000,  76_000),
+                "PGM":       ( 28_000,  33_600),   # Safe <28k · Borderline 28-33.6k · Unsafe >33.6k (~70%/84% of 40k)
+            }
+            def _fscell(name):
+                v    = _fstocks.get(name, 0)
+                api  = _fde.get("stock_apis", {}).get(name, 0.0)
+                ovf  = _fde.get("overflows", {}).get(name, 0)
+                lo, hi = _FSTOCK_THRESHOLDS.get(name, (189_000, 228_000))
+                if v < lo:
+                    bg, col, label = "#166534", "#bbf7d0", "Safe"
+                elif v <= hi:
+                    bg, col, label = "#854d0e", "#fef08a", "Borderline"
                 else:
-                    _ffb = next(iter(_fseen_transients), None)
-                    if _ffb:
-                        _fdis_by_transient.setdefault(_ffb, []).append(_fdr)
+                    bg, col, label = "#991b1b", "#fecaca", "Unsafe"
+                _api_str = f'<br><span style="color:{col};font-size:8px;opacity:0.8">API {api:.2f}°</span>' if v > 0 else ""
+                _ovf_str = (f'<span style="color:#fca5a5;font-size:8px;font-weight:700"> (+{_kkk(ovf)})</span>'
+                            if ovf > 0 else "")
+                return (
+                    f'<td style="background:{bg};text-align:center">' +
+                    f'<span style="color:{col};font-weight:700;font-size:10px">{_kkk(v)}</span>' +
+                    _ovf_str +
+                    f'<br><span style="color:{col};font-size:8px;opacity:0.85">{label}</span>' +
+                    _api_str + '</td>'
+                )
+            _fstock_cells = "".join(_fscell(n) for n in _storage_names) + _fscell("Ibom")
 
-            _fblocks = []
-            for _ftidx, (_ftname, _ftnoms) in enumerate(_fseen_transients.items()):
-                _ftc  = VESSEL_COLORS.get(_ftname, "#334155")
-                _ftime = _ftnoms[0]["Time"][11:16] if _ftnoms else ""
-                _ftrn_vcode = str(_ftnoms[0].get("VoyageCode", "")).strip() if _ftnoms else ""
-                _ftrn_detail = str(_ftnoms[-1].get("Detail", "")) if _ftnoms else ""
-                _ftrn_onboard = ""
+            # Loading cells — exact same logic as main renderer (_lcell)
+            _factive_ov = st.session_state.get("jmp_storage_overrides", {})
+            def _fload(name):
+                entries = [r for r in _fde["loadings"] if _parse_storage(r["Detail"]) == name]
+                if not entries:
+                    return f'<td>{_idle()}</td>'
+                chips = []
+                for r in entries:
+                    _ov_fentry = _factive_ov.get(r["Vessel"], {}).get(str(_fd))
+                    _f_forced = (
+                        _ov_fentry == name
+                        or (isinstance(_ov_fentry, dict)
+                            and _ov_fentry.get("storage") == name)
+                    )
+                    _f_label = (
+                        f"{r['Vessel']} | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}"
+                        + (" 🔒" if _f_forced else "")
+                    )
+                    _f_vcode = str(r.get("VoyageCode", "")).strip()
+                    _f_vcode_sub = (
+                        f'<div style="margin-top:2px;margin-bottom:1px">'
+                        f'<span style="background:rgba(0,0,0,0.40);border-radius:2px;'
+                        f'padding:0 5px;font-size:9px;font-family:monospace;'
+                        f'letter-spacing:0.03em">{_f_vcode}</span></div>'
+                        if _f_vcode else ""
+                    )
+                    chips.append(_chip(r["Vessel"], _f_label) + _f_vcode_sub)
+                inner = "<br>".join(chips)
+                return f"<td>{inner}</td>"
+            _fload_cells = "".join(_fload(n) for n in _storage_names)
+
+            # Returning vessel
+            _fret = _fde["returning"]
+            _fret_vessel = "<br>".join(
+                _chip(r["Vessel"], f"{r['Vessel']} → {r['Detail'].split('Arrived ')[-1].split(' —')[0]}")
+                for r in _fret
+            ) if _fret else _idle()
+            _fret_eta = "<br>".join(r["Time"][11:16] for r in _fret) if _fret else _idle()
+
+            def _feta_label(r):
+                """Full-run ETA label with cargo volume and +N day suffix when ETA crosses midnight."""
+                _eta_time = r["Time"][11:16]
+                _eta_date_str = r["Time"][:10]
+                _cargo = _parse_cargo(r.get("Detail", ""))
+                _cargo_str = f" | {_kkk(_cargo)}" if _cargo > 0 else ""
                 try:
-                    _fob = _re_fd.search(r"on-board:\s*([\d,]+)\s*bbl", _ftrn_detail)
-                    if _fob:
-                        _ftrn_onboard = f"{int(_fob.group(1).replace(',','')) // 1000}k bbl"
+                    import datetime as _dtimp2
+                    _feta_date = _dtimp2.date.fromisoformat(_eta_date_str)
+                    _fdate = _jmp_start + _dt.timedelta(days=_fd - 1)
+                    _fdays_ahead = (_feta_date - _fdate).days
+                    if _fdays_ahead == 1:
+                        return f"{r['Vessel']} ({_eta_time} +1d){_cargo_str}"
+                    elif _fdays_ahead >= 2:
+                        return f"{r['Vessel']} ({_eta_time} +{_fdays_ahead}d){_cargo_str}"
                 except Exception:
                     pass
-                _fvcode_badge = (
-                    f'<div style="background:rgba(0,0,0,0.3);border-radius:2px;'
-                    f'padding:0 5px;font-size:9px;font-family:monospace;color:#fff;'
-                    f'display:inline-block;margin:1px 0">{_ftrn_vcode}</div>'
-                ) if _ftrn_vcode else ""
-                _fonboard_badge = (
-                    f'<div style="font-size:8px;color:#166534;margin:1px 0">📦 {_ftrn_onboard}</div>'
-                ) if _ftrn_onboard else ""
-                _fdis_rows = _fdis_by_transient.get(_ftname, [])
-                _fdis_chips = "".join(
-                    f'<div style="margin:1px 0">'
-                    f'<span style="background:{VESSEL_COLORS.get(r["Vessel"],"#334155")};color:#fff;'
-                    f'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:700;'
-                    f'display:inline-block">{r["Vessel"]}</span>'
-                    + (f'<span style="display:block;background:rgba(0,0,0,0.3);border-radius:2px;'
-                       f'padding:0 4px;font-size:8px;font-family:monospace;color:#fff;margin-top:1px">'
-                       f'{str(r.get("VoyageCode","")).strip()}</span>'
-                       if str(r.get("VoyageCode","")).strip() else "")
-                    + f'</div>'
-                    for r in _fdis_rows
-                ) if _fdis_rows else ""
-                _fsep = '<hr style="border:none;border-top:1px solid #86efac;margin:4px 0">' if _ftidx > 0 else ""
-                _fblocks.append(
-                    f'{_fsep}'
-                    f'<div style="font-size:9px;color:#166534;font-weight:700;margin-bottom:2px">🔄 MTO {_ftime}</div>'
-                    f'<span style="background:{_ftc};color:#fff;border-radius:3px;'
-                    f'padding:1px 6px;font-size:10px;font-weight:700">{_ftname}</span>'
-                    f'{_fvcode_badge}{_fonboard_badge}'
-                    + (f'<div style="font-size:9px;color:#64748b;margin:2px 0">receives from</div>'
-                       f'{_fdis_chips}' if _fdis_chips else "")
+                return f"{r['Vessel']} ({_eta_time}){_cargo_str}"
+
+            _ffwy = _fde["fairway"]
+            _fbia_arr = "<br>".join(
+                _chip(r["Vessel"], _feta_label(r)) + _vcode_badge(r)
+                for r in _ffwy
+            ) if _ffwy else _idle()
+
+            # Discharge cells
+            def _fdcell(mother):
+                entries  = [r for r in _fde["discharge"] if _parse_mother(r["Detail"]) == mother]
+                ms       = _fmstocks.get(mother, 0)
+                mapi     = _fde.get("m_stock_apis", {}).get(mother, 0.0)
+                _api_bit = f' · API {mapi:.2f}°' if ms > 0 else ""
+                _at_exp  = mother in _fde.get("mothers_at_export", set())
+
+                def _fentry_chip(r):
+                    vc = str(r.get("VoyageCode", "")).strip()
+                    _is_mto = vc.endswith("A") and len(vc) > 1
+                    return (
+                        _chip(r["Vessel"],
+                              f"{r['Vessel']} | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}")
+                        + _vcode_badge(r, mto_transient=_is_mto)
+                    )
+
+                if _at_exp:
+                    stk = f'<span style="font-size:9px;color:#bfdbfe">Stock: {_kkk(ms)}{_api_bit}</span>'
+                    _exp_label = '<div style="font-size:9px;font-weight:700;color:#fff;letter-spacing:0.06em;margin-bottom:2px">⚓ EXPORT OPS</div>'
+                    if not entries:
+                        return (f'<td style="background:#1e3a5f;text-align:center;vertical-align:middle">'
+                                f'{_exp_label}{stk}</td>')
+                    stk2 = f'<span style="font-size:9px;color:#bfdbfe;display:block;margin-bottom:2px">Stock: {_kkk(ms)}{_api_bit}</span>'
+                    inner = "<br>".join(_fentry_chip(r) for r in entries)
+                    return f'<td style="background:#1e3a5f">{_exp_label}{stk2}{inner}</td>'
+                stk = f'<span style="font-size:9px;color:#94a3b8">Stock: {_kkk(ms)}{_api_bit}</span>'
+                if not entries:
+                    return f'<td style="text-align:center">{_idle()}<br>{stk}</td>'
+                stk2 = f'<span style="font-size:9px;color:#64748b;display:block;margin-bottom:2px">Stock: {_kkk(ms)}{_api_bit}</span>'
+                inner = "<br>".join(_fentry_chip(r) for r in entries)
+                return f"<td>{stk2}{inner}</td>"
+            _fdisch_cells = "".join(_fdcell(n) for n in _mother_names)
+
+            # ── ZeeZee column for full-run / PDF render ───────────────────────────
+            def _zz_fdcell():
+                _fzz_entries = [
+                    r for r in _fde["discharge"]
+                    if r.get("Vessel") == "ZeeZee"
+                ]
+                _fd_day_rows = log_df[log_df["Day"] == _fd]
+                _fzz_waiting = [
+                    r for r in _fd_day_rows[
+                        _fd_day_rows["Event"].isin([
+                            "WAITING_BERTH_B", "WAITING_MOTHER_CAPACITY",
+                            "BERTHING_START_B", "HOSE_CONNECTION_START_B",
+                            "ZEEZEE_DEADLINE_OVERRIDE",
+                        ])
+                    ].to_dict("records")
+                    if r.get("Vessel") == "ZeeZee"
+                ]
+                if not _fzz_entries and not _fzz_waiting:
+                    _fzz_present = [
+                        r for r in _fd_day_rows[
+                            _fd_day_rows["Vessel"] == "ZeeZee"
+                        ].to_dict("records")
+                    ]
+                    if _fzz_present:
+                        _fstatus = _fzz_present[-1].get("Event", "")
+                        _flbl = {
+                            "VESSEL_JOINED":           "🚢 Arrived",
+                            "WAITING_BERTH_B":         "⏳ Waiting",
+                            "WAITING_MOTHER_CAPACITY": "⏳ No cap.",
+                            "ZEEZEE_DEADLINE_OVERRIDE":"⚡ Priority",
+                            "BERTHING_START_B":        "⚓ Berthing",
+                            "HOSE_CONNECTION_START_B": "🔗 Hose conn.",
+                        }.get(_fstatus, _fstatus)
+                        return (f'<td style="background:#f0f4ff;text-align:center">'
+                                f'<span style="font-size:10px;color:#1e3a5f;font-weight:600">'
+                                f'{_flbl}</span></td>')
+                    return f'<td style="text-align:center">{_idle()}</td>'
+                if _fzz_entries:
+                    inner = "<br>".join(
+                        _chip("ZeeZee",
+                              f"ZeeZee | {r['Time'][11:16]} | {_kkk(_parse_cargo(r['Detail']))}",
+                              bg="#1e3a5f")
+                        for r in _fzz_entries
+                    )
+                    return f'<td style="background:#eef2ff">{inner}</td>'
+                _fzws = _fzz_waiting[-1]
+                _flbl2 = {
+                    "WAITING_BERTH_B":         "⏳ Waiting",
+                    "WAITING_MOTHER_CAPACITY": "⏳ Awaiting cap.",
+                    "ZEEZEE_DEADLINE_OVERRIDE":"⚡ Priority",
+                    "BERTHING_START_B":        "⚓ Berthing",
+                    "HOSE_CONNECTION_START_B": "🔗 Hose conn.",
+                }.get(_fzws.get("Event", ""), _fzws.get("Event", ""))
+                return (f'<td style="background:#f0f4ff;text-align:center">'
+                        f'<span style="font-size:10px;color:#1e3a5f;font-weight:600">'
+                        f'{_flbl2}</span></td>')
+
+            _fdisch_cells = "".join(_fdcell(n) for n in _mother_names)
+
+            # ── MTO column for full-run / PDF render ──────────────────────────────
+            def _mto_fdcell():
+                import re as _re_fd
+                _fd_day_rows = log_df[log_df["Day"] == _fd]
+                _fmto_nom = _fd_day_rows[
+                    _fd_day_rows["Event"] == "MTO_TRANSIENT_NOMINATED"
+                ].to_dict("records")
+                _fmto_dis = _fd_day_rows[
+                    _fd_day_rows["Event"] == "MTO_DISCHARGE_TO_TRANSIENT"
+                ].to_dict("records")
+                if not _fmto_nom and not _fmto_dis:
+                    return f'<td style="text-align:center;background:#f0fdf4">{_idle()}</td>'
+
+                # Group nominations by transient vessel
+                _fseen_transients = {}
+                for _fnr in _fmto_nom:
+                    _ftn = _fnr["Vessel"]
+                    _fseen_transients.setdefault(_ftn, []).append(_fnr)
+
+                # Map discharger events back to transient by parsing Detail text
+                _fdis_by_transient = {}
+                for _fdr in _fmto_dis:
+                    _fdt_match = _re_fd.search(r"to\s+(\w+):", _fdr.get("Detail", ""))
+                    _ftrn_key = _fdt_match.group(1) if _fdt_match else None
+                    if _ftrn_key and _ftrn_key in _fseen_transients:
+                        _fdis_by_transient.setdefault(_ftrn_key, []).append(_fdr)
+                    else:
+                        _ffb = next(iter(_fseen_transients), None)
+                        if _ffb:
+                            _fdis_by_transient.setdefault(_ffb, []).append(_fdr)
+
+                _fblocks = []
+                for _ftidx, (_ftname, _ftnoms) in enumerate(_fseen_transients.items()):
+                    _ftc  = VESSEL_COLORS.get(_ftname, "#334155")
+                    _ftime = _ftnoms[0]["Time"][11:16] if _ftnoms else ""
+                    _ftrn_vcode = str(_ftnoms[0].get("VoyageCode", "")).strip() if _ftnoms else ""
+                    _ftrn_detail = str(_ftnoms[-1].get("Detail", "")) if _ftnoms else ""
+                    _ftrn_onboard = ""
+                    try:
+                        _fob = _re_fd.search(r"on-board:\s*([\d,]+)\s*bbl", _ftrn_detail)
+                        if _fob:
+                            _ftrn_onboard = f"{int(_fob.group(1).replace(',','')) // 1000}k bbl"
+                    except Exception:
+                        pass
+                    _fvcode_badge = (
+                        f'<div style="background:rgba(0,0,0,0.3);border-radius:2px;'
+                        f'padding:0 5px;font-size:9px;font-family:monospace;color:#fff;'
+                        f'display:inline-block;margin:1px 0">{_ftrn_vcode}</div>'
+                    ) if _ftrn_vcode else ""
+                    _fonboard_badge = (
+                        f'<div style="font-size:8px;color:#166534;margin:1px 0">📦 {_ftrn_onboard}</div>'
+                    ) if _ftrn_onboard else ""
+                    _fdis_rows = _fdis_by_transient.get(_ftname, [])
+                    _fdis_chips = "".join(
+                        f'<div style="margin:1px 0">'
+                        f'<span style="background:{VESSEL_COLORS.get(r["Vessel"],"#334155")};color:#fff;'
+                        f'border-radius:3px;padding:1px 5px;font-size:9px;font-weight:700;'
+                        f'display:inline-block">{r["Vessel"]}</span>'
+                        + (f'<span style="display:block;background:rgba(0,0,0,0.3);border-radius:2px;'
+                           f'padding:0 4px;font-size:8px;font-family:monospace;color:#fff;margin-top:1px">'
+                           f'{str(r.get("VoyageCode","")).strip()}</span>'
+                           if str(r.get("VoyageCode","")).strip() else "")
+                        + f'</div>'
+                        for r in _fdis_rows
+                    ) if _fdis_rows else ""
+                    _fsep = '<hr style="border:none;border-top:1px solid #86efac;margin:4px 0">' if _ftidx > 0 else ""
+                    _fblocks.append(
+                        f'{_fsep}'
+                        f'<div style="font-size:9px;color:#166534;font-weight:700;margin-bottom:2px">🔄 MTO {_ftime}</div>'
+                        f'<span style="background:{_ftc};color:#fff;border-radius:3px;'
+                        f'padding:1px 6px;font-size:10px;font-weight:700">{_ftname}</span>'
+                        f'{_fvcode_badge}{_fonboard_badge}'
+                        + (f'<div style="font-size:9px;color:#64748b;margin:2px 0">receives from</div>'
+                           f'{_fdis_chips}' if _fdis_chips else "")
+                    )
+
+                return (
+                    f'<td style="background:#ecfdf5;text-align:center">'
+                    + "".join(_fblocks)
+                    + f'</td>'
                 )
 
-            return (
-                f'<td style="background:#ecfdf5;text-align:center">'
-                + "".join(_fblocks)
-                + f'</td>'
+            _full_rows_html.append(
+                f"<tr>{_fdate_cell}{_fstock_cells}{_fload_cells}"
+                f"<td>{_fret_vessel}</td><td style='text-align:center'>{_fret_eta}</td>"
+                f"<td>{_fbia_arr}</td>"
+                f"{_fdisch_cells}{_zz_fdcell()}{_mto_fdcell()}</tr>"
             )
 
-        _full_rows_html.append(
-            f"<tr>{_fdate_cell}{_fstock_cells}{_fload_cells}"
-            f"<td>{_fret_vessel}</td><td style='text-align:center'>{_fret_eta}</td>"
-            f"<td>{_fbia_arr}</td>"
-            f"{_fdisch_cells}{_zz_fdcell()}{_mto_fdcell()}</tr>"
+        # Re-use same header as main table
+        _full_table_html = (
+            '<div class="jmp-wrap"><table class="jmp-table">'
+            '<tr>'
+            '<th rowspan="2" class="sec-hdr-cell">Date</th>'
+            '<th colspan="7" class="sec-hdr-cell">Opening Stock (bbl)</th>'
+            '<th colspan="6" class="sec-hdr-cell">Loading Plan</th>'
+            '<th colspan="2" class="sec-hdr-cell">Returning to Load</th>'
+            '<th colspan="1" class="sec-hdr-cell">Arriving BIA</th>'
+            '<th colspan="4" class="sec-hdr-cell">Discharging Plan</th>'
+            '<th style="background:#1a3a2a" class="sec-hdr-cell">MTO</th>'
+            '</tr>'
+            '<tr>'
+            '<th>Chapel</th><th>JasmineS</th><th>Westmore</th><th>Duke</th><th>Starturn</th><th>PGM</th><th>Ibom</th>'
+            '<th>Chapel</th><th>JasmineS</th><th>Westmore</th><th>Duke</th><th>Starturn</th><th>PGM</th>'
+            '<th>Vessel &rarr; Storage</th><th>ETA</th>'
+            '<th>Vessel (ETA)</th>'
+            '<th>Bryanston</th><th>GreenEagle</th><th>MT SanBarth</th>'
+            '<th style="background:#1e3a5f">ZeeZee</th>'
+            '<th style="background:#1a3a2a">MTO<br><span style="font-size:9px;font-weight:400">Transient ↔ Discharger</span></th>'
+            '</tr>'
+            + "".join(_full_rows_html)
+            + '</table></div>'
         )
 
-    # Re-use same header as main table
-    _full_table_html = (
-        '<div class="jmp-wrap"><table class="jmp-table">'
-        '<tr>'
-        '<th rowspan="2" class="sec-hdr-cell">Date</th>'
-        '<th colspan="7" class="sec-hdr-cell">Opening Stock (bbl)</th>'
-        '<th colspan="6" class="sec-hdr-cell">Loading Plan</th>'
-        '<th colspan="2" class="sec-hdr-cell">Returning to Load</th>'
-        '<th colspan="1" class="sec-hdr-cell">Arriving BIA</th>'
-        '<th colspan="4" class="sec-hdr-cell">Discharging Plan</th>'
-        '<th style="background:#1a3a2a" class="sec-hdr-cell">MTO</th>'
-        '</tr>'
-        '<tr>'
-        '<th>Chapel</th><th>JasmineS</th><th>Westmore</th><th>Duke</th><th>Starturn</th><th>PGM</th><th>Ibom</th>'
-        '<th>Chapel</th><th>JasmineS</th><th>Westmore</th><th>Duke</th><th>Starturn</th><th>PGM</th>'
-        '<th>Vessel &rarr; Storage</th><th>ETA</th>'
-        '<th>Vessel (ETA)</th>'
-        '<th>Bryanston</th><th>GreenEagle</th><th>MT SanBarth</th>'
-        '<th style="background:#1e3a5f">ZeeZee</th>'
-        '<th style="background:#1a3a2a">MTO<br><span style="font-size:9px;font-weight:400">Transient ↔ Discharger</span></th>'
-        '</tr>'
-        + "".join(_full_rows_html)
-        + '</table></div>'
-    )
+        _css_rules = chr(10).join([
+            ".jmp-wrap{overflow-x:auto;padding:4px 0}",
+            ".jmp-table{border-collapse:collapse;min-width:100%;font-size:11px}",
+            ".jmp-table th{background:#1a2744;color:#fff;padding:5px 8px;text-align:center;font-size:10px;font-weight:700;letter-spacing:.04em;border:1px solid #344d80;white-space:nowrap}",
+            ".jmp-table th.sec-hdr-cell{background:#0f1a35}",
+            ".jmp-table td{padding:5px 7px;border:1px solid #e2e8f0;vertical-align:top;white-space:nowrap}",
+            ".jmp-table tr:nth-child(even) td{background:#f8f9fb}",
+            ".jmp-table tr:nth-child(odd) td{background:#ffffff}",
+            ".jmp-date{font-weight:700;color:#1a2744;font-size:11px}",
+            ".jmp-entry{display:inline-block;border-radius:4px;padding:2px 6px;margin:1px 0;font-size:10px;font-weight:600;color:#fff;white-space:nowrap;line-height:1.5}",
+            ".jmp-idle{color:#94a3b8;font-size:10px;font-style:italic}",
+            ".jmp-bia-entry{display:inline-block;border-radius:4px;padding:2px 6px;margin:1px 0;font-size:10px;font-weight:600;white-space:nowrap;line-height:1.5}",
+            "@media print{body{margin:8px}@page{size:landscape;margin:10mm}}",
+        ])
+        _vessel_legend = "".join(
+            f'<span style="background:{c};color:#fff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">{v}</span>'
+            for v, c in VESSEL_COLORS.items()
+        )
 
-    _css_rules = chr(10).join([
-        ".jmp-wrap{overflow-x:auto;padding:4px 0}",
-        ".jmp-table{border-collapse:collapse;min-width:100%;font-size:11px}",
-        ".jmp-table th{background:#1a2744;color:#fff;padding:5px 8px;text-align:center;font-size:10px;font-weight:700;letter-spacing:.04em;border:1px solid #344d80;white-space:nowrap}",
-        ".jmp-table th.sec-hdr-cell{background:#0f1a35}",
-        ".jmp-table td{padding:5px 7px;border:1px solid #e2e8f0;vertical-align:top;white-space:nowrap}",
-        ".jmp-table tr:nth-child(even) td{background:#f8f9fb}",
-        ".jmp-table tr:nth-child(odd) td{background:#ffffff}",
-        ".jmp-date{font-weight:700;color:#1a2744;font-size:11px}",
-        ".jmp-entry{display:inline-block;border-radius:4px;padding:2px 6px;margin:1px 0;font-size:10px;font-weight:600;color:#fff;white-space:nowrap;line-height:1.5}",
-        ".jmp-idle{color:#94a3b8;font-size:10px;font-style:italic}",
-        ".jmp-bia-entry{display:inline-block;border-radius:4px;padding:2px 6px;margin:1px 0;font-size:10px;font-weight:600;white-space:nowrap;line-height:1.5}",
-        "@media print{body{margin:8px}@page{size:landscape;margin:10mm}}",
-    ])
-    _vessel_legend = "".join(
-        f'<span style="background:{c};color:#fff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">{v}</span>'
-        for v, c in VESSEL_COLORS.items()
-    )
+        # Page-scoped HTML (current page — for on-screen reference)
+        _full_html = f"""<!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+      body{{margin:16px;background:#fff;font-family:'Segoe UI',system-ui,Arial,sans-serif}}
+      h2{{color:#1a2744;font-size:15px;margin:0 0 10px;font-weight:800;letter-spacing:.03em}}
+      {_css_rules}
+    </style>
+    </head>
+    <body>
+    <h2>🗺️ {_jmp_title_str}</h2>
+    {_table_html}
+    <div style="margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:6px">
+    {_vessel_legend}
+    </div>
+    <div style="font-size:9px;color:#94a3b8;margin-top:8px">Generated: {_dt.datetime.now().strftime("%Y-%m-%d %H:%M")} | Tanker Operations v5</div>
+    </body></html>"""
 
-    # Page-scoped HTML (current page — for on-screen reference)
-    _full_html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  body{{margin:16px;background:#fff;font-family:'Segoe UI',system-ui,Arial,sans-serif}}
-  h2{{color:#1a2744;font-size:15px;margin:0 0 10px;font-weight:800;letter-spacing:.03em}}
-  {_css_rules}
-</style>
-</head>
-<body>
-<h2>🗺️ {_jmp_title_str}</h2>
-{_table_html}
-<div style="margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:6px">
-{_vessel_legend}
-</div>
-<div style="font-size:9px;color:#94a3b8;margin-top:8px">Generated: {_dt.datetime.now().strftime("%Y-%m-%d %H:%M")} | Tanker Operations v5</div>
-</body></html>"""
+        # Full-run HTML (all days — for PDF download)
+        # Only build if cache miss; otherwise reuse stored value.
+        if not _full_run_html_ready:
+            _build_full_now = True
+        else:
+            _build_full_now = False
+            _full_run_html = _cached_full_html
+        if _build_full_now:
+            _full_run_html_inner = f"""<!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+      body{{margin:16px;background:#fff;font-family:'Segoe UI',system-ui,Arial,sans-serif}}
+      h2{{color:#1a2744;font-size:15px;margin:0 0 10px;font-weight:800;letter-spacing:.03em}}
+      {_css_rules}
+    </style>
+    </head>
+    <body>
+    <h2>🗺️ {_full_title_str}</h2>
+    {_full_table_html}
+    <div style="margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:6px">
+    {_vessel_legend}
+    </div>
+    <div style="font-size:9px;color:#94a3b8;margin-top:8px">Generated: {_dt.datetime.now().strftime("%Y-%m-%d %H:%M")} | Tanker Operations v5</div>
+    </body></html>"""
+            _full_run_html = _full_run_html_inner
+            # Store in session_state so subsequent widget re-renders skip the build
+            st.session_state["_jmp_full_html"] = _full_run_html
+            st.session_state["_jmp_full_key"]  = _jmp_rebuild_key
 
-    # Full-run HTML (all days — for PDF download)
-    # Only build if cache miss; otherwise reuse stored value.
-    if not _full_run_html_ready:
-        _build_full_now = True
-    else:
-        _build_full_now = False
-        _full_run_html = _cached_full_html
-    if _build_full_now:
-        _full_run_html_inner = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  body{{margin:16px;background:#fff;font-family:'Segoe UI',system-ui,Arial,sans-serif}}
-  h2{{color:#1a2744;font-size:15px;margin:0 0 10px;font-weight:800;letter-spacing:.03em}}
-  {_css_rules}
-</style>
-</head>
-<body>
-<h2>🗺️ {_full_title_str}</h2>
-{_full_table_html}
-<div style="margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:6px">
-{_vessel_legend}
-</div>
-<div style="font-size:9px;color:#94a3b8;margin-top:8px">Generated: {_dt.datetime.now().strftime("%Y-%m-%d %H:%M")} | Tanker Operations v5</div>
-</body></html>"""
-        _full_run_html = _full_run_html_inner
-        # Store in session_state so subsequent widget re-renders skip the build
-        st.session_state["_jmp_full_html"] = _full_run_html
-        st.session_state["_jmp_full_key"]  = _jmp_rebuild_key
-
-    _dc1, _dc2, _dc3 = st.columns([2,2,2])
-    with _dc1:
-        # Full-run HTML download — all days, landscape print-ready
-        st.download_button(
-            f"📥 Download Full JMP as HTML ({_total_sim_days} days → Print → Save as PDF)",
-            data=_full_run_html.encode("utf-8"),
-            file_name=f"journey_plan_full_{_jmp_start.isoformat()}.html",
-            mime="text/html",
-            help=(
-                f"Downloads the complete {_total_sim_days}-day Journey Management Plan as a "
-                "self-contained HTML file. Open in Chrome/Edge → Ctrl+P (or Cmd+P) → "
-                "Change destination to 'Save as PDF' → Layout: Landscape → Save."
+        _dc1, _dc2, _dc3 = st.columns([2,2,2])
+        with _dc1:
+            # Full-run HTML download — all days, landscape print-ready
+            st.download_button(
+                f"📥 Download Full JMP as HTML ({_total_sim_days} days → Print → Save as PDF)",
+                data=_full_run_html.encode("utf-8"),
+                file_name=f"journey_plan_full_{_jmp_start.isoformat()}.html",
+                mime="text/html",
+                help=(
+                    f"Downloads the complete {_total_sim_days}-day Journey Management Plan as a "
+                    "self-contained HTML file. Open in Chrome/Edge → Ctrl+P (or Cmd+P) → "
+                    "Change destination to 'Save as PDF' → Layout: Landscape → Save."
+                )
             )
-        )
-    with _dc2:
-        # CSV export of raw plan data
-        _jmp_rows = []
-        for _day in range(1, _total_sim_days + 1):
-            _date = _jmp_start + _dt.timedelta(days=_day - 1)
-            _de2 = _ev[_day]
-            for r in _de2["loadings"]:
-                _jmp_rows.append({"Date": _date, "Section": "Loading", "Vessel": r["Vessel"],
-                    "Location": _parse_storage(r["Detail"]), "Time": r["Time"][11:16],
-                    "Cargo_bbl": _parse_cargo(r["Detail"]), "Mother": "",
-                    "VoyageCode": r.get("VoyageCode",""), "Detail": r.get("Detail","")})
-            for r in _de2["discharge"]:
-                _jmp_rows.append({"Date": _date, "Section": "Discharge", "Vessel": r["Vessel"],
-                    "Location": "", "Time": r["Time"][11:16],
-                    "Cargo_bbl": _parse_cargo(r["Detail"]), "Mother": _parse_mother(r["Detail"]),
-                    "VoyageCode": r.get("VoyageCode",""), "Detail": r.get("Detail","")})
-            for r in _de2["returning"]:
-                _jmp_rows.append({"Date": _date, "Section": "Returning", "Vessel": r["Vessel"],
-                    "Location": r["Detail"].split("Arrived ")[-1].split(" —")[0],
-                    "Time": r["Time"][11:16], "Cargo_bbl": 0, "Mother": "",
-                    "VoyageCode": r.get("VoyageCode",""), "Detail": r.get("Detail","")})
-            for r in _de2["fairway"]:
-                _jmp_rows.append({"Date": _date, "Section": "BIA Arrival", "Vessel": r["Vessel"],
-                    "Location": "Fairway", "Time": r["Time"][11:16], "Cargo_bbl": 0, "Mother": "",
-                    "VoyageCode": r.get("VoyageCode",""), "Detail": r.get("Detail","")})
-            # Add MTO events for completeness
-            _day_log = log_df[log_df["Day"] == _day] if not log_df.empty else pd.DataFrame()
-            if not _day_log.empty:
-                _mto_evts = _day_log[_day_log["Event"].str.contains("MTO|EXPORT|WAITING_BERTH_B|CAST_OFF|SJ_TRANSLOAD", na=False)]
-                for _, r in _mto_evts.iterrows():
-                    _jmp_rows.append({"Date": _date, "Section": r["Event"], "Vessel": r["Vessel"],
-                        "Location": "", "Time": str(r["Time"])[11:16],
-                        "Cargo_bbl": "", "Mother": r.get("Mother",""),
-                        "VoyageCode": r.get("VoyageCode",""), "Detail": str(r.get("Detail",""))[:120]})
-        _jmp_csv = pd.DataFrame(_jmp_rows).to_csv(index=False).encode()
-        st.download_button(
-            f"📥 Download Complete Activity Log CSV ({_total_sim_days} days)",
-            data=_jmp_csv,
-            file_name=f"journey_plan_full_{_jmp_start.isoformat()}.csv",
-            mime="text/csv"
-        )
-    with _dc3:
-        st.caption(
-            "💡 **PDF tip:** Download the HTML file, open in Chrome/Edge → "
-            "Ctrl+P → destination 'Save as PDF' → **Layout: Landscape** → Save. "
-            "All days are included regardless of which page is shown above."
-        )
+        with _dc2:
+            # CSV export of raw plan data
+            _jmp_rows = []
+            for _day in range(1, _total_sim_days + 1):
+                _date = _jmp_start + _dt.timedelta(days=_day - 1)
+                _de2 = _ev[_day]
+                for r in _de2["loadings"]:
+                    _jmp_rows.append({"Date": _date, "Section": "Loading", "Vessel": r["Vessel"],
+                        "Location": _parse_storage(r["Detail"]), "Time": r["Time"][11:16],
+                        "Cargo_bbl": _parse_cargo(r["Detail"]), "Mother": "",
+                        "VoyageCode": r.get("VoyageCode",""), "Detail": r.get("Detail","")})
+                for r in _de2["discharge"]:
+                    _jmp_rows.append({"Date": _date, "Section": "Discharge", "Vessel": r["Vessel"],
+                        "Location": "", "Time": r["Time"][11:16],
+                        "Cargo_bbl": _parse_cargo(r["Detail"]), "Mother": _parse_mother(r["Detail"]),
+                        "VoyageCode": r.get("VoyageCode",""), "Detail": r.get("Detail","")})
+                for r in _de2["returning"]:
+                    _jmp_rows.append({"Date": _date, "Section": "Returning", "Vessel": r["Vessel"],
+                        "Location": r["Detail"].split("Arrived ")[-1].split(" —")[0],
+                        "Time": r["Time"][11:16], "Cargo_bbl": 0, "Mother": "",
+                        "VoyageCode": r.get("VoyageCode",""), "Detail": r.get("Detail","")})
+                for r in _de2["fairway"]:
+                    _jmp_rows.append({"Date": _date, "Section": "BIA Arrival", "Vessel": r["Vessel"],
+                        "Location": "Fairway", "Time": r["Time"][11:16], "Cargo_bbl": 0, "Mother": "",
+                        "VoyageCode": r.get("VoyageCode",""), "Detail": r.get("Detail","")})
+                # Add MTO events for completeness
+                _day_log = log_df[log_df["Day"] == _day] if not log_df.empty else pd.DataFrame()
+                if not _day_log.empty:
+                    _mto_evts = _day_log[_day_log["Event"].str.contains("MTO|EXPORT|WAITING_BERTH_B|CAST_OFF|SJ_TRANSLOAD", na=False)]
+                    for _, r in _mto_evts.iterrows():
+                        _jmp_rows.append({"Date": _date, "Section": r["Event"], "Vessel": r["Vessel"],
+                            "Location": "", "Time": str(r["Time"])[11:16],
+                            "Cargo_bbl": "", "Mother": r.get("Mother",""),
+                            "VoyageCode": r.get("VoyageCode",""), "Detail": str(r.get("Detail",""))[:120]})
+            _jmp_csv = pd.DataFrame(_jmp_rows).to_csv(index=False).encode()
+            st.download_button(
+                f"📥 Download Complete Activity Log CSV ({_total_sim_days} days)",
+                data=_jmp_csv,
+                file_name=f"journey_plan_full_{_jmp_start.isoformat()}.csv",
+                mime="text/csv"
+            )
+        with _dc3:
+            st.caption(
+                "💡 **PDF tip:** Download the HTML file, open in Chrome/Edge → "
+                "Ctrl+P → destination 'Save as PDF' → **Layout: Landscape** → Save. "
+                "All days are included regardless of which page is shown above."
+            )
 
 
-    # ==========================================================================
-    # ── SECTION 12: DOWNLOADS ─────────────────────────────────────────────────
-    # ==========================================================================
-    sec("🌊 Tidal Prediction — Declared Daylight Tides")
 
 
-    if _tide_bytes is None:
-        st.info("ℹ️ No tidal file uploaded — upload a tidal CSV in the sidebar to see declared daylight tides and activate the breakwater constraint.")
-    else:
-        # Parse tide bytes directly — no sim module dependency
-        try:
-            _tide_min_m = 1.6
-            _DSTART     = 6
-            _DEND       = 18
-            _SIM_HOUR_OFFSET = 8.0
-            _sim_epoch  = _dt.datetime(_today_date.year, _today_date.month, _today_date.day, 8, 0)  # t=0 = 08:00
-            _sim_days_t = params.get("sim_days", 14)
+    with _tide_tab:
+        sec("🌊 Tidal Prediction — Declared Daylight Tides")
 
-            def _parse_tide_bytes(raw_bytes, epoch_dt):
-                """Parse raw tide CSV bytes → {abs_hour: height} dict."""
-                text   = raw_bytes.decode("utf-8-sig", errors="replace")
-                sample = text[:2048]
-                delim  = "," if sample.count(",") >= sample.count(";") else ";"
-                reader = csv.DictReader(io.StringIO(text), delimiter=delim)
-                rows   = [{k.strip().lower().replace(" ","_"): v.strip()
-                           for k, v in r.items()} for r in reader]
-                if not rows:
-                    return {}
-                date_col   = next((k for k in rows[0] if "date" in k), None)
-                time_col   = next((k for k in rows[0] if "time" in k), None)
-                height_col = next((k for k in rows[0]
-                                   if any(x in k for x in ("height","tide","level","_m"))), None)
-                if not (date_col and time_col and height_col):
-                    return {}
-                raw_pts = {}
-                for row in rows:
-                    try:
-                        ds = row[date_col]; ts = row[time_col]; hs = row[height_col]
-                        if not hs: continue
-                        if "/" in ds:
-                            p = ds.split("/")
-                            d = (_dt.datetime(int(p[2]),int(p[1]),int(p[0]))
-                                 if len(p[2])==4
-                                 else _dt.datetime(int(p[0]),int(p[1]),int(p[2])))
-                        else:
-                            d = _dt.datetime.fromisoformat(ds.split("T")[0])
-                        t_parts = ts.split(":")
-                        hh, mm = int(t_parts[0]), int(t_parts[1][:2])
-                        dt  = d.replace(hour=hh, minute=mm)
-                        ht  = float(re.sub(r"[^0-9.\-]", "", hs))
-                        diff = (dt - epoch_dt).total_seconds() / 3600.0
-                        raw_pts[round(diff * 2) / 2] = ht
-                    except Exception:
-                        continue
-                if not raw_pts:
-                    return {}
-                # Linear interpolation onto 0.5 h grid
-                sk = sorted(raw_pts)
-                full = {}
-                _slot_start = int(sk[0] * 2)
-                _slot_end = int(sk[-1] * 2) + 2
-                for slot in [x * 0.5 for x in range(_slot_start, _slot_end)]:
-                    if slot in raw_pts:
-                        full[slot] = raw_pts[slot]
-                    else:
-                        lo = max((k for k in sk if k <= slot), default=None)
-                        hi = min((k for k in sk if k >= slot), default=None)
-                        if lo is not None and hi is not None and hi != lo:
-                            f = (slot - lo) / (hi - lo)
-                            full[slot] = raw_pts[lo] + f * (raw_pts[hi] - raw_pts[lo])
-                        elif lo is not None:
-                            full[slot] = raw_pts[lo]
-                        elif hi is not None:
-                            full[slot] = raw_pts[hi]
-                return full
 
-            _tide_tbl = _parse_tide_bytes(_tide_bytes, _sim_epoch)
-            _tide_ok  = bool(_tide_tbl)
 
-            if not _tide_ok:
-                st.warning("⚠️ Tidal file uploaded but could not be parsed. Check column names: Date (DD/MM/YYYY) · Time (HH:MM) · Tide_Height_m")
-            else:
+        if _tide_bytes is None:
+            st.info("ℹ️ No tidal file uploaded — upload a tidal CSV in the sidebar to see declared daylight tides and activate the breakwater constraint.")
+        else:
+            # Parse tide bytes directly — no sim module dependency
+            try:
+                _tide_min_m = 1.6
+                _DSTART     = 6
+                _DEND       = 18
+                _SIM_HOUR_OFFSET = 8.0
+                _sim_epoch  = _dt.datetime(_today_date.year, _today_date.month, _today_date.day, 8, 0)  # t=0 = 08:00
                 _sim_days_t = params.get("sim_days", 14)
 
-                # ── Build daily summary ──────────────────────────────────────
-                _daily_rows = []
-                for _day in range(_sim_days_t):
-                    _date_d    = _today_date + _dt.timedelta(days=_day)
-                    _day_start = _day * 24.0 - _SIM_HOUR_OFFSET
-                    _day_end   = _day_start + 24.0
+                def _parse_tide_bytes(raw_bytes, epoch_dt):
+                    """Parse raw tide CSV bytes → {abs_hour: height} dict."""
+                    text   = raw_bytes.decode("utf-8-sig", errors="replace")
+                    sample = text[:2048]
+                    delim  = "," if sample.count(",") >= sample.count(";") else ";"
+                    reader = csv.DictReader(io.StringIO(text), delimiter=delim)
+                    rows   = [{k.strip().lower().replace(" ","_"): v.strip()
+                               for k, v in r.items()} for r in reader]
+                    if not rows:
+                        return {}
+                    date_col   = next((k for k in rows[0] if "date" in k), None)
+                    time_col   = next((k for k in rows[0] if "time" in k), None)
+                    height_col = next((k for k in rows[0]
+                                       if any(x in k for x in ("height","tide","level","_m"))), None)
+                    if not (date_col and time_col and height_col):
+                        return {}
+                    raw_pts = {}
+                    for row in rows:
+                        try:
+                            ds = row[date_col]; ts = row[time_col]; hs = row[height_col]
+                            if not hs: continue
+                            if "/" in ds:
+                                p = ds.split("/")
+                                d = (_dt.datetime(int(p[2]),int(p[1]),int(p[0]))
+                                     if len(p[2])==4
+                                     else _dt.datetime(int(p[0]),int(p[1]),int(p[2])))
+                            else:
+                                d = _dt.datetime.fromisoformat(ds.split("T")[0])
+                            t_parts = ts.split(":")
+                            hh, mm = int(t_parts[0]), int(t_parts[1][:2])
+                            dt  = d.replace(hour=hh, minute=mm)
+                            ht  = float(re.sub(r"[^0-9.\-]", "", hs))
+                            diff = (dt - epoch_dt).total_seconds() / 3600.0
+                            raw_pts[round(diff * 2) / 2] = ht
+                        except Exception:
+                            continue
+                    if not raw_pts:
+                        return {}
+                    # Linear interpolation onto 0.5 h grid
+                    sk = sorted(raw_pts)
+                    full = {}
+                    _slot_start = int(sk[0] * 2)
+                    _slot_end = int(sk[-1] * 2) + 2
+                    for slot in [x * 0.5 for x in range(_slot_start, _slot_end)]:
+                        if slot in raw_pts:
+                            full[slot] = raw_pts[slot]
+                        else:
+                            lo = max((k for k in sk if k <= slot), default=None)
+                            hi = min((k for k in sk if k >= slot), default=None)
+                            if lo is not None and hi is not None and hi != lo:
+                                f = (slot - lo) / (hi - lo)
+                                full[slot] = raw_pts[lo] + f * (raw_pts[hi] - raw_pts[lo])
+                            elif lo is not None:
+                                full[slot] = raw_pts[lo]
+                            elif hi is not None:
+                                full[slot] = raw_pts[hi]
+                    return full
 
-                    # All half-hour slots for this calendar day
-                    _slots = {h: v for h, v in _tide_tbl.items()
-                              if _day_start <= h < _day_end}
+                _tide_tbl = _parse_tide_bytes(_tide_bytes, _sim_epoch)
+                _tide_ok  = bool(_tide_tbl)
 
-                    if not _slots:
+                if not _tide_ok:
+                    st.warning("⚠️ Tidal file uploaded but could not be parsed. Check column names: Date (DD/MM/YYYY) · Time (HH:MM) · Tide_Height_m")
+                else:
+                    _sim_days_t = params.get("sim_days", 14)
+
+                    # ── Build daily summary ──────────────────────────────────────
+                    _daily_rows = []
+                    for _day in range(_sim_days_t):
+                        _date_d    = _today_date + _dt.timedelta(days=_day)
+                        _day_start = _day * 24.0 - _SIM_HOUR_OFFSET
+                        _day_end   = _day_start + 24.0
+
+                        # All half-hour slots for this calendar day
+                        _slots = {h: v for h, v in _tide_tbl.items()
+                                  if _day_start <= h < _day_end}
+
+                        if not _slots:
+                            _daily_rows.append({
+                                "Date": _date_d.strftime("%a %d %b"),
+                                "High Tide": "—", "High Time": "—",
+                                "Low Tide": "—", "Low Time": "—",
+                                "Declared Daylight Tides (>1.6m)": "No tidal data for this day",
+                                "Declared Tides": 0,
+                            })
+                            continue
+
+                        # High and low tide
+                        _peak_h    = max(_slots, key=_slots.get)
+                        _trough_h  = min(_slots, key=_slots.get)
+                        _peak_dt   = (_sim_epoch + _dt.timedelta(hours=_peak_h)).strftime("%H:%M")
+                        _trough_dt = (_sim_epoch + _dt.timedelta(hours=_trough_h)).strftime("%H:%M")
+
+                        _declared = []
+                        for _h in sorted(_slots):
+                            _hod = (_h + _SIM_HOUR_OFFSET) % 24
+                            _hgt = _slots[_h]
+                            if _DSTART <= _hod < _DEND and _hgt > _tide_min_m:
+                                _tm = (_sim_epoch + _dt.timedelta(hours=_h)).strftime("%H:%M")
+                                _declared.append(f"{_tm} ({_hgt:.2f} m)")
+
+                        _declared_str = "  ·  ".join(_declared) if _declared else "❌ No declared daylight tide >1.6m"
+
                         _daily_rows.append({
-                            "Date": _date_d.strftime("%a %d %b"),
-                            "High Tide": "—", "High Time": "—",
-                            "Low Tide": "—", "Low Time": "—",
-                            "Declared Daylight Tides (>1.6m)": "No tidal data for this day",
-                            "Declared Tides": 0,
+                            "Date":   _date_d.strftime("%a %d %b"),
+                            "High Tide": f"{_slots[_peak_h]:.2f} m",
+                            "High Time": _peak_dt,
+                            "Low Tide":  f"{_slots[_trough_h]:.2f} m",
+                            "Low Time":  _trough_dt,
+                            "Declared Daylight Tides (>1.6m)": _declared_str,
+                            "Declared Tides": len(_declared),
                         })
-                        continue
 
-                    # High and low tide
-                    _peak_h    = max(_slots, key=_slots.get)
-                    _trough_h  = min(_slots, key=_slots.get)
-                    _peak_dt   = (_sim_epoch + _dt.timedelta(hours=_peak_h)).strftime("%H:%M")
-                    _trough_dt = (_sim_epoch + _dt.timedelta(hours=_trough_h)).strftime("%H:%M")
+                    _tide_df = pd.DataFrame(_daily_rows)
 
-                    _declared = []
-                    for _h in sorted(_slots):
-                        _hod = (_h + _SIM_HOUR_OFFSET) % 24
-                        _hgt = _slots[_h]
-                        if _DSTART <= _hod < _DEND and _hgt > _tide_min_m:
-                            _tm = (_sim_epoch + _dt.timedelta(hours=_h)).strftime("%H:%M")
-                            _declared.append(f"{_tm} ({_hgt:.2f} m)")
+                    # ── Metric strip ────────────────────────────────────────────
+                    _no_cross_days = (_tide_df["Declared Tides"] == 0).sum()
+                    _avg_declared  = _tide_df["Declared Tides"].mean()
+                    _total_declared = _tide_df["Declared Tides"].sum()
+                    _tc1, _tc2, _tc3, _tc4 = st.columns(4)
+                    with _tc1: kpi("Sim Days Covered", f'{len(_daily_rows)}')
+                    with _tc2: kpi("Avg Declared Tides/Day",  f'{_avg_declared:.1f}')
+                    with _tc3: kpi("Total Declared Tides",    f'{int(_total_declared)}')
+                    with _tc4: kpi("Restricted Days",
+                                   f'{_no_cross_days}',
+                                   sub="days with no declared daylight tide" if _no_cross_days else "✅ all days have declared tides")
 
-                    _declared_str = "  ·  ".join(_declared) if _declared else "❌ No declared daylight tide >1.6m"
+                    # ── Threshold reminder ───────────────────────────────────────
+                    st.markdown(
+                        f'<div style="background:#f0f9ff;border:1px solid #3b82f6;border-radius:8px;'
+                        f'padding:10px 16px;margin:8px 0 12px;font-size:12px;color:#1e40af">'
+                        f'🌊 <b>Breakwater crossing rule:</b> vessels may only depart when tide is '
+                        f'<b>>{_tide_min_m:.1f} m</b> '
+                        f'AND within daylight (<b>{_DSTART:02d}:00–{_DEND:02d}:00</b>). '
+                        f'Only daylight tide points above threshold are declared. '
+                        f'The simulation enforces this for all outbound departures from SanBarth '
+                        f'and return sailings from BIA.</div>',
+                        unsafe_allow_html=True)
 
-                    _daily_rows.append({
-                        "Date":   _date_d.strftime("%a %d %b"),
-                        "High Tide": f"{_slots[_peak_h]:.2f} m",
-                        "High Time": _peak_dt,
-                        "Low Tide":  f"{_slots[_trough_h]:.2f} m",
-                        "Low Time":  _trough_dt,
-                        "Declared Daylight Tides (>1.6m)": _declared_str,
-                        "Declared Tides": len(_declared),
-                    })
+                    # ── Daily table ──────────────────────────────────────────────
+                    def _tide_row_color(row):
+                        # Use the declared tide count stored in a parallel list by index
+                        idx = row.name
+                        w = _daily_rows[idx]["Declared Tides"] if idx < len(_daily_rows) else 1
+                        if w == 0:
+                            return ['background-color:#fef2f2;color:#991b1b'] * len(row)
+                        elif w == 1:
+                            return ['background-color:#fef9c3;color:#713f12'] * len(row)
+                        else:
+                            return ['background-color:#f0fdf4;color:#14532d'] * len(row)
 
-                _tide_df = pd.DataFrame(_daily_rows)
+                    _tide_display_df = _tide_df.drop(columns=["Declared Tides"]).reset_index(drop=True)
+                    _tide_display = _tide_display_df.style.apply(_tide_row_color, axis=1)
+                    st.dataframe(_tide_display, hide_index=True, width="stretch")
 
-                # ── Metric strip ────────────────────────────────────────────
-                _no_cross_days = (_tide_df["Declared Tides"] == 0).sum()
-                _avg_declared  = _tide_df["Declared Tides"].mean()
-                _total_declared = _tide_df["Declared Tides"].sum()
-                _tc1, _tc2, _tc3, _tc4 = st.columns(4)
-                with _tc1: kpi("Sim Days Covered", f'{len(_daily_rows)}')
-                with _tc2: kpi("Avg Declared Tides/Day",  f'{_avg_declared:.1f}')
-                with _tc3: kpi("Total Declared Tides",    f'{int(_total_declared)}')
-                with _tc4: kpi("Restricted Days",
-                               f'{_no_cross_days}',
-                               sub="days with no declared daylight tide" if _no_cross_days else "✅ all days have declared tides")
+                    # ── Intraday chart for selected day ──────────────────────────
+                    st.markdown("**📈 Intraday tidal profile — select a day to inspect:**")
+                    _day_opts   = [r["Date"] for r in _daily_rows]
+                    _sel_day_lbl = st.selectbox("Day", _day_opts, key="tide_day_sel",
+                                                label_visibility="collapsed")
+                    _sel_day_idx = _day_opts.index(_sel_day_lbl)
+                    _sd_start    = _sel_day_idx * 24.0 - _SIM_HOUR_OFFSET
+                    _sd_end      = _sd_start + 24.0
+                    _sd_slots    = {h: v for h, v in _tide_tbl.items()
+                                    if _sd_start <= h < _sd_end}
 
-                # ── Threshold reminder ───────────────────────────────────────
-                st.markdown(
-                    f'<div style="background:#f0f9ff;border:1px solid #3b82f6;border-radius:8px;'
-                    f'padding:10px 16px;margin:8px 0 12px;font-size:12px;color:#1e40af">'
-                    f'🌊 <b>Breakwater crossing rule:</b> vessels may only depart when tide is '
-                    f'<b>>{_tide_min_m:.1f} m</b> '
-                    f'AND within daylight (<b>{_DSTART:02d}:00–{_DEND:02d}:00</b>). '
-                    f'Only daylight tide points above threshold are declared. '
-                    f'The simulation enforces this for all outbound departures from SanBarth '
-                    f'and return sailings from BIA.</div>',
-                    unsafe_allow_html=True)
+                    if _sd_slots:
+                        import plotly.graph_objects as _pgo
+                        _sd_hours  = sorted(_sd_slots)
+                        _sd_hods   = [((h + _SIM_HOUR_OFFSET) % 24) for h in _sd_hours]
+                        _sd_heights = [_sd_slots[h] for h in _sd_hours]
+                        _sd_labels  = [f"{int(h):02d}:{int((h%1)*60):02d}" for h in _sd_hods]
 
-                # ── Daily table ──────────────────────────────────────────────
-                def _tide_row_color(row):
-                    # Use the declared tide count stored in a parallel list by index
-                    idx = row.name
-                    w = _daily_rows[idx]["Declared Tides"] if idx < len(_daily_rows) else 1
-                    if w == 0:
-                        return ['background-color:#fef2f2;color:#991b1b'] * len(row)
-                    elif w == 1:
-                        return ['background-color:#fef9c3;color:#713f12'] * len(row)
-                    else:
-                        return ['background-color:#f0fdf4;color:#14532d'] * len(row)
-
-                _tide_display_df = _tide_df.drop(columns=["Declared Tides"]).reset_index(drop=True)
-                _tide_display = _tide_display_df.style.apply(_tide_row_color, axis=1)
-                st.dataframe(_tide_display, hide_index=True, width="stretch")
-
-                # ── Intraday chart for selected day ──────────────────────────
-                st.markdown("**📈 Intraday tidal profile — select a day to inspect:**")
-                _day_opts   = [r["Date"] for r in _daily_rows]
-                _sel_day_lbl = st.selectbox("Day", _day_opts, key="tide_day_sel",
-                                            label_visibility="collapsed")
-                _sel_day_idx = _day_opts.index(_sel_day_lbl)
-                _sd_start    = _sel_day_idx * 24.0 - _SIM_HOUR_OFFSET
-                _sd_end      = _sd_start + 24.0
-                _sd_slots    = {h: v for h, v in _tide_tbl.items()
-                                if _sd_start <= h < _sd_end}
-
-                if _sd_slots:
-                    import plotly.graph_objects as _pgo
-                    _sd_hours  = sorted(_sd_slots)
-                    _sd_hods   = [((h + _SIM_HOUR_OFFSET) % 24) for h in _sd_hours]
-                    _sd_heights = [_sd_slots[h] for h in _sd_hours]
-                    _sd_labels  = [f"{int(h):02d}:{int((h%1)*60):02d}" for h in _sd_hods]
-
-                    _fig_t = _pgo.Figure()
-                    # Tide curve
-                    _fig_t.add_trace(_pgo.Scatter(
-                        x=_sd_hods, y=_sd_heights,
-                        mode="lines", name="Tide height (m)",
-                        line=dict(color="#3b82f6", width=2.5),
-                        hovertemplate="%{text}: %{y:.2f} m<extra></extra>",
-                        text=_sd_labels,
-                    ))
-                    # Threshold line
-                    _fig_t.add_hline(
-                        y=_tide_min_m, line_dash="dash",
-                        line_color="#ef4444", line_width=1.5,
-                        annotation_text=f"Min crossing {_tide_min_m:.1f} m",
-                        annotation_position="bottom right",
-                        annotation_font_color="#ef4444",
-                    )
-                    # Daylight shading
-                    _fig_t.add_vrect(x0=_DSTART, x1=_DEND,
-                        fillcolor="rgba(253,224,71,0.12)", line_width=0,
-                        annotation_text="Daylight window", annotation_position="top left",
-                        annotation_font_color="#b45309", annotation_font_size=10)
-                    # Valid crossing zones (tide > threshold AND daylight) — green fill
-                    _in_zone = False
-                    _zone_x0 = None
-                    for _i, (_hod, _hgt) in enumerate(zip(_sd_hods, _sd_heights)):
-                        _ok = _hgt > _tide_min_m and _DSTART <= _hod < _DEND
-                        if _ok and not _in_zone:
-                            _zone_x0 = _hod; _in_zone = True
-                        elif not _ok and _in_zone:
-                            _fig_t.add_vrect(x0=_zone_x0, x1=_hod,
+                        _fig_t = _pgo.Figure()
+                        # Tide curve
+                        _fig_t.add_trace(_pgo.Scatter(
+                            x=_sd_hods, y=_sd_heights,
+                            mode="lines", name="Tide height (m)",
+                            line=dict(color="#3b82f6", width=2.5),
+                            hovertemplate="%{text}: %{y:.2f} m<extra></extra>",
+                            text=_sd_labels,
+                        ))
+                        # Threshold line
+                        _fig_t.add_hline(
+                            y=_tide_min_m, line_dash="dash",
+                            line_color="#ef4444", line_width=1.5,
+                            annotation_text=f"Min crossing {_tide_min_m:.1f} m",
+                            annotation_position="bottom right",
+                            annotation_font_color="#ef4444",
+                        )
+                        # Daylight shading
+                        _fig_t.add_vrect(x0=_DSTART, x1=_DEND,
+                            fillcolor="rgba(253,224,71,0.12)", line_width=0,
+                            annotation_text="Daylight window", annotation_position="top left",
+                            annotation_font_color="#b45309", annotation_font_size=10)
+                        # Valid crossing zones (tide > threshold AND daylight) — green fill
+                        _in_zone = False
+                        _zone_x0 = None
+                        for _i, (_hod, _hgt) in enumerate(zip(_sd_hods, _sd_heights)):
+                            _ok = _hgt > _tide_min_m and _DSTART <= _hod < _DEND
+                            if _ok and not _in_zone:
+                                _zone_x0 = _hod; _in_zone = True
+                            elif not _ok and _in_zone:
+                                _fig_t.add_vrect(x0=_zone_x0, x1=_hod,
+                                    fillcolor="rgba(34,197,94,0.18)", line_width=0)
+                                _in_zone = False
+                        if _in_zone:
+                            _fig_t.add_vrect(x0=_zone_x0, x1=_DEND,
                                 fillcolor="rgba(34,197,94,0.18)", line_width=0)
-                            _in_zone = False
-                    if _in_zone:
-                        _fig_t.add_vrect(x0=_zone_x0, x1=_DEND,
-                            fillcolor="rgba(34,197,94,0.18)", line_width=0)
 
-                    _fig_t.update_layout(
-                        height=280, margin=dict(l=40, r=20, t=30, b=40),
-                        paper_bgcolor="#0f1a35", plot_bgcolor="#0f1a35",
-                        font=dict(color="#cbd5e1", size=11),
-                        xaxis=dict(title="Hour of day", tickmode="linear",
-                                   tick0=0, dtick=2, gridcolor="#1e2d4a",
-                                   range=[0, 24]),
-                        yaxis=dict(title="Height (m)", gridcolor="#1e2d4a"),
-                        legend=dict(bgcolor="rgba(0,0,0,0)", font_size=10),
-                        showlegend=True,
-                    )
-                    st.plotly_chart(_fig_t, width="stretch", config={"displayModeBar": False})
-                    # Summary for selected day
-                    _sel_row = _daily_rows[_sel_day_idx]
-                    _cwin_txt = _sel_row["Declared Daylight Tides (>1.6m)"]
-                    st.caption(
-                        f"**{_sel_day_lbl}** — High: {_sel_row['High Tide']} at {_sel_row['High Time']} · "
-                        f"Low: {_sel_row['Low Tide']} at {_sel_row['Low Time']} · "
-                        f"Declared daylight tides: {_cwin_txt}"
-                    )
-        except Exception as _e_tide:
-            st.warning(f"⚠️ Could not render tidal prediction: {_e_tide}")
+                        _fig_t.update_layout(
+                            height=280, margin=dict(l=40, r=20, t=30, b=40),
+                            paper_bgcolor="#0f1a35", plot_bgcolor="#0f1a35",
+                            font=dict(color="#cbd5e1", size=11),
+                            xaxis=dict(title="Hour of day", tickmode="linear",
+                                       tick0=0, dtick=2, gridcolor="#1e2d4a",
+                                       range=[0, 24]),
+                            yaxis=dict(title="Height (m)", gridcolor="#1e2d4a"),
+                            legend=dict(bgcolor="rgba(0,0,0,0)", font_size=10),
+                            showlegend=True,
+                        )
+                        st.plotly_chart(_fig_t, width="stretch", config={"displayModeBar": False})
+                        # Summary for selected day
+                        _sel_row = _daily_rows[_sel_day_idx]
+                        _cwin_txt = _sel_row["Declared Daylight Tides (>1.6m)"]
+                        st.caption(
+                            f"**{_sel_day_lbl}** — High: {_sel_row['High Tide']} at {_sel_row['High Time']} · "
+                            f"Low: {_sel_row['Low Tide']} at {_sel_row['Low Time']} · "
+                            f"Declared daylight tides: {_cwin_txt}"
+                        )
+            except Exception as _e_tide:
+                st.warning(f"⚠️ Could not render tidal prediction: {_e_tide}")
 
-    # ==========================================================================
-    # ── SECTION 0: OPTIMIZATION ENGINE ───────────────────────────────────────
-    # ==========================================================================
+        # ==========================================================================
+        # ── SECTION 0: OPTIMIZATION ENGINE ───────────────────────────────────────
+        # ==========================================================================
+
+
     sec("🧠 Optimization Engine — Heuristic Parameter Search")
 
     if not run_opt:

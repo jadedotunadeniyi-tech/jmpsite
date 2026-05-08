@@ -235,6 +235,7 @@ _DAUGHTER_ROWS = [
     ( "Bagshot",     43_000 ),   # Point A/C/D — loads 7th
     ( "Watson",      85_000 ),   # Point A/C — loads 8th
     ( "Amyla",     63_000 ),   # Point A/C/F — loads 9th
+    ( "Rahama",    30_000 ),   # Point A (Chapel/JasmineS only) — loads 10th
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 # Derived — do not edit these two lines
@@ -251,7 +252,11 @@ WESTMORE_PERMITTED_VESSELS  = {"Sherlock", "Bagshot", "Rathbone", "Watson", "Lap
 DUKE_PERMITTED_VESSELS      = {"Woodstock", "Bagshot", "Rathbone", "SantaMonica"}
 STARTURN_PERMITTED_VESSELS  = {"Woodstock", "Rathbone", "SantaMonica", "Bagshot"}
 POINT_A_ONLY_VESSELS        = set()   # Amyla now permitted at Westmore (C) and Ibom (F)
-CHAPEL_SLOW_LOADERS         = {"Woodstock", "Bagshot", "Rathbone", "SantaMonica"}  # reduced Chapel rate
+CHAPEL_SLOW_LOADERS         = {"Woodstock", "Bagshot", "Rathbone", "SantaMonica", "Rahama"}  # reduced Chapel rate
+
+# Vessels that may never be nominated as the MTO transient (receiver).
+# They may still act as MTO dischargers (pumping cargo into another vessel).
+MTO_NEVER_RECEIVER          = {"Rahama", "SantaMonica"}
 POINT_A_LOAD_CAP_VESSELS    = {"Bedford", "Balham"}      # capped at POINT_A_LOAD_CAP_BBL at Point A
 
 # Special per-vessel storage allowlists (overrides all set-based checks above)
@@ -349,6 +354,7 @@ VESSEL_DISCHARGE_RATE_BPH: dict = {
     "Woodstock":   3_500,   # 42,000 bbl class — 12 h full-load discharge
     "Bagshot":     3_583,   # 43,000 bbl class — 12 h full-load discharge
     "Rathbone":    3_667,   # 44,000 bbl class — 12 h full-load discharge
+    "Rahama":      4_000,   # 30,000 bbl class — operator-specified 4,000 bph
 }
 # Derived from VESSEL_DISCHARGE_RATE_BPH so both constants stay in sync.
 # Must be defined AFTER VESSEL_DISCHARGE_RATE_BPH.
@@ -415,7 +421,8 @@ MTO_TRANSIENT_CAPACITY_BBL: dict = {
 # Setting this higher lets the transient absorb more stranded cargoes on
 # prolonged congested periods (e.g. mother away at export for 2+ days).
 # The optimizer sweeps this parameter when MTO is enabled.
-MTO_MAX_PARCELS_BEFORE_OFFLOAD: int = 1
+MTO_MAX_PARCELS_BEFORE_OFFLOAD: int = 1       # base value when primaries available
+MTO_MAX_PARCELS_ESCALATED:     int = 3       # raised when BOTH primaries are down
 
 # ── Internal: derived values (auto-computed from config table above) ──────────
 NUM_DAUGHTERS             = len(VESSEL_NAMES)
@@ -2464,9 +2471,18 @@ class Simulation:
         _is_noon_or_later = wall_hour >= 12.0
         if not (_is_morning or _is_noon_or_later):
             return
-        # Allow up to 2 MTO nominations per calendar day
+        # Allow up to 2 MTO nominations per day normally; 4 when both primaries are down
+        # (we check both-primaries-down later, but use a quick pre-check here)
+        _bryanston_ok = (self.mother_is_at_point_b(MOTHER_PRIMARY_NAME, t)
+                         and self.mother_capacity_bbl(MOTHER_PRIMARY_NAME)
+                             - self.mother_bbl.get(MOTHER_PRIMARY_NAME, 0) > 0)
+        _greeneagle_ok = (self.mother_is_at_point_b(MOTHER_SECONDARY_NAME, t)
+                          and self.mother_capacity_bbl(MOTHER_SECONDARY_NAME)
+                              - self.mother_bbl.get(MOTHER_SECONDARY_NAME, 0) > 0)
+        _primaries_both_down_early = not _bryanston_ok and not _greeneagle_ok
+        _max_fires = 4 if _primaries_both_down_early else 2
         _day_fires = self._mto_days_fired.get(day_key, 0)
-        if _day_fires >= 2:
+        if _day_fires >= _max_fires:
             return
         # Morning window: fire only if not already fired today
         if _is_morning and not _is_noon_or_later and _day_fires >= 1:
@@ -2539,6 +2555,26 @@ class Simulation:
         # ── All gates passed — record this fire ──────────────────────────────
         self._mto_days_fired[day_key] = self._mto_days_fired.get(day_key, 0) + 1
 
+        # Check if BOTH primary mothers (Bryanston + GreenEagle) are simultaneously
+        # unavailable — either at export, full, or manually blocked.  When true,
+        # escalate MTO aggressiveness: raise parcel limit, allow up to 2 MTO fires
+        # per day, and fill large vessels (230k → 125k → smaller) before smaller.
+        _bryanston_available = (
+            self.mother_is_at_point_b(MOTHER_PRIMARY_NAME, t)
+            and (self.mother_capacity_bbl(MOTHER_PRIMARY_NAME)
+                 - self.mother_bbl[MOTHER_PRIMARY_NAME]) >= _min_cargo
+        )
+        _greeneagle_available = (
+            self.mother_is_at_point_b(MOTHER_SECONDARY_NAME, t)
+            and (self.mother_capacity_bbl(MOTHER_SECONDARY_NAME)
+                 - self.mother_bbl[MOTHER_SECONDARY_NAME]) >= _min_cargo
+        )
+        _both_primaries_down = not _bryanston_available and not _greeneagle_available
+        _effective_parcel_limit = (
+            MTO_MAX_PARCELS_ESCALATED if _both_primaries_down
+            else MTO_MAX_PARCELS_BEFORE_OFFLOAD
+        )
+
         # ── Check for an existing active transient to top up ──────────────────
         # Also detect vessels that have _is_mto_offload=True (claimed a berth
         # but may have re-anchored after an abort) — they still hold consolidated
@@ -2565,17 +2601,18 @@ class Simulation:
                 getattr(vv, "_mto_target_vessel", None) == existing_transient.name
                 for vv in self.vessels
             )
-            if (_parcels_so_far >= MTO_MAX_PARCELS_BEFORE_OFFLOAD or _headroom <= 0) and not _has_queued_discharger:
+            if (_parcels_so_far >= _effective_parcel_limit or _headroom <= 0) and not _has_queued_discharger:
                 self.log_event(
                     t, existing_transient.name, "MTO_PARCEL_LIMIT_REACHED",
                     f"[MTO Day {day_key+1}] No further top-ups — "
-                    f"{'parcel limit reached' if _parcels_so_far >= MTO_MAX_PARCELS_BEFORE_OFFLOAD else 'at capacity'} "
+                    f"{'parcel limit reached' if _parcels_so_far >= _effective_parcel_limit else 'at capacity'} "
                     f"({existing_transient.cargo_bbl:,.0f}/{_trn_cap:,.0f} bbl) | "
+                    f"{'ESCALATED (both primaries down)' if _both_primaries_down else 'normal limit'} | "
                     f"awaiting opportunistic mother berth",
                     voyage_num=existing_transient.current_voyage,
                 )
                 return
-            elif (_parcels_so_far >= MTO_MAX_PARCELS_BEFORE_OFFLOAD or _headroom <= 0) and _has_queued_discharger:
+            elif (_parcels_so_far >= _effective_parcel_limit or _headroom <= 0) and _has_queued_discharger:
                 # Queued discharger will arrive and use the arrival handler — skip auto gate
                 return
 
@@ -2625,7 +2662,12 @@ class Simulation:
                 # Secondary: most headroom; hard-wait bonus applied on top
                 return cap * 10_000 + hdroom + hard_bonus
 
-            waiters_scored = sorted(waiters, key=_nom_score, reverse=True)
+            # Exclude vessels that are never eligible to be MTO transient (receiver)
+            _eligible_transients = [vv for vv in waiters
+                                    if vv.name not in MTO_NEVER_RECEIVER]
+            if not _eligible_transients:
+                return
+            waiters_scored = sorted(_eligible_transients, key=_nom_score, reverse=True)
             transient_v   = waiters_scored[0]
             _trn_cap      = _mto_cap(transient_v)
             _headroom     = max(0.0, _trn_cap - transient_v.cargo_bbl)
