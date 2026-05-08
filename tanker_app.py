@@ -1837,16 +1837,28 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                     _raw_cargo = int(d["cargo_bbl"])
                     _vcap      = v.cargo_capacity
                     _over      = max(0, _raw_cargo - _vcap)
-                    # MTO receiver vessels may legitimately carry cargo above their
-                    # normal capacity (they act as temporary floating storage).
-                    # Their MTO_TRANSIENT_CAPACITY_BBL governs the real ceiling.
-                    # Do NOT clamp or spill their cargo — keep the full volume on
-                    # the vessel so the MTO discharge math is correct.
                     _is_mto_recv_vessel = d.get("is_mto_receiver", False)
                     _mto_cap = getattr(mod, "MTO_TRANSIENT_CAPACITY_BBL", {}).get(
                         v.name, v.cargo_capacity)
-                    if _is_mto_recv_vessel and _raw_cargo <= _mto_cap:
-                        # Within MTO capacity — accept full volume, no spill
+
+                    # ── MTO receiver: honour pre-computed combined cargo ───────
+                    # When Case A (active discharger seeding) ran BEFORE this vessel
+                    # in the loop, it already computed:
+                    #   v.cargo_bbl = receiver_startup_cargo + discharger_cargo
+                    # and set v._mto_seeded_cargo to that combined value.
+                    # Do NOT overwrite it with the raw startup cargo — that would
+                    # erase the discharger's contribution and give the receiver the
+                    # wrong total (e.g. 78k instead of 116k).
+                    if hasattr(v, "_mto_seeded_cargo"):
+                        v.cargo_bbl = v._mto_seeded_cargo
+                        if hasattr(v, "_mto_seeded_api") and v._mto_seeded_api > 0:
+                            sim.vessel_api[v.name] = v._mto_seeded_api
+                        # Attributes consumed — remove so they don't persist
+                        del v._mto_seeded_cargo
+                        if hasattr(v, "_mto_seeded_api"):
+                            del v._mto_seeded_api
+                    elif _is_mto_recv_vessel and _raw_cargo <= _mto_cap:
+                        # Within MTO capacity — accept full startup cargo, no spill
                         v.cargo_bbl = _raw_cargo
                     elif _is_mto_recv_vessel and _raw_cargo > _mto_cap:
                         # Over MTO cap — clamp to MTO cap (still no spill accounting)
@@ -1855,8 +1867,6 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                         # Normal vessel: clamp to cargo_capacity and spill excess
                         v.cargo_bbl = min(_raw_cargo, _vcap)
                         if _over > 0:
-                            # Credit excess cargo as pre-existing spill (no specific
-                            # storage attribution — use a vessel-level overflow key)
                             _vspill_key = f"vessel_{v.name}"
                             sim.storage_overflow_bbl[_vspill_key] = (
                                 sim.storage_overflow_bbl.get(_vspill_key, 0.0) + _over
@@ -1933,38 +1943,49 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                         _mto_bert_h   = getattr(mod, "BERTHING_DELAY_HOURS",  0.5)
                         _mto_coff_h   = getattr(mod, "CAST_OFF_HOURS",        0.2)
 
-                        # ── Critical: set _mto_target_vessel on the vessel object ──
-                        # Without this, the sim's HOSE_CONNECT_B handler fires at
-                        # next_event_time, sees assigned_mother not in MOTHER_NAMES,
-                        # and resets the vessel to WAITING_BERTH_B — losing the MTO pair.
                         v._mto_target_vessel = _mto_tv
 
                         # Flag receiver as active MTO transient
                         _mto_recv_v._mto_transient_since_day = 0
                         _mto_recv_v._mto_parcels_received    = 0
 
-                        # ── Execute the transfer immediately in the seeding block ──
-                        # For HOSE_CONNECT_B / DISCHARGING: no cargo has been credited
-                        # to the receiver yet (hose was just connected or pump just started).
-                        # Credit the full transfer now and advance both vessels to their
-                        # correct post-transfer state. This mirrors what the arrival handler
-                        # does for SAILING_AB_LEG2 dischargers.
-                        _trn_cap_seed = getattr(mod, "MTO_TRANSIENT_CAPACITY_BBL", {}).get(
+                        # ── Correct receiver startup cargo ────────────────────
+                        # The receiver vessel may NOT have been cargo-seeded yet
+                        # (vessels are processed in VESSEL_NAMES order; e.g. Rathbone
+                        # index 2 runs before Bagshot index 7). Read the receiver's
+                        # startup cargo directly from the vessel_states dict `vs`
+                        # so we sum the correct total: receiver_startup + discharger.
+                        _recv_vs_entry  = vs.get(_mto_recv_v.name, {})
+                        _recv_startup_cargo = int(_recv_vs_entry.get("cargo_bbl") or 0)
+                        _mto_cap_seed   = getattr(mod, "MTO_TRANSIENT_CAPACITY_BBL", {}).get(
                             _mto_recv_v.name, _mto_recv_v.cargo_capacity)
-                        _headroom_seed = max(0.0, _trn_cap_seed - _mto_recv_v.cargo_bbl)
-                        _xfer_seed     = min(_transfer_bbl, _headroom_seed)
+                        _recv_api_seed  = float(_recv_vs_entry.get("cargo_api", 0.0) or 0.0)
 
-                        if _xfer_seed > 0:
-                            # Credit cargo to receiver
-                            _trn_old = _mto_recv_v.cargo_bbl
-                            _trn_api = sim.vessel_api.get(_mto_recv_v.name, 0.0)
-                            _new_trn = _trn_old + _xfer_seed
-                            if _new_trn > 0:
-                                sim.vessel_api[_mto_recv_v.name] = (
-                                    (_trn_old * _trn_api + _xfer_seed * _dis_api_val) / _new_trn
-                                )
-                            _mto_recv_v.cargo_bbl = _new_trn
-                            _mto_recv_v._mto_parcels_received = 1
+                        # Headroom based on true startup cargo (not the yet-to-be-seeded
+                        # vessel.cargo_bbl which is still at its default 0)
+                        _headroom_seed  = max(0.0, _mto_cap_seed - _recv_startup_cargo)
+                        _xfer_seed      = min(_transfer_bbl, _headroom_seed)
+
+                        # Combine: receiver keeps its startup cargo + incoming transfer
+                        _new_recv_cargo = _recv_startup_cargo + _xfer_seed
+                        _recv_api_weighted = (
+                            (_recv_startup_cargo * _recv_api_seed
+                             + _xfer_seed * _dis_api_val) / _new_recv_cargo
+                            if _new_recv_cargo > 0 else 0.0
+                        )
+
+                        # Write to vessel object now so the log is accurate
+                        _mto_recv_v.cargo_bbl = _new_recv_cargo
+                        sim.vessel_api[_mto_recv_v.name] = _recv_api_weighted
+                        _mto_recv_v._mto_parcels_received = 1 if _xfer_seed > 0 else 0
+
+                        # Mark the receiver with the final combined cargo so that
+                        # the cargo-seeding pass (which runs when Bagshot's own dict
+                        # entry is processed) knows NOT to overwrite with raw startup cargo.
+                        # We store the intended final value on the vessel; the cargo-seeding
+                        # block will detect this flag and skip the overwrite.
+                        _mto_recv_v._mto_seeded_cargo = _new_recv_cargo
+                        _mto_recv_v._mto_seeded_api   = _recv_api_weighted
 
                         # Compute timing based on current phase
                         if v.status == "DISCHARGING":
@@ -2027,9 +2048,31 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                         )
 
                 if _is_mto_recv:
-                    # Case C — receiver vessel
-                    v._mto_transient_since_day = 0
+                    # Case C — receiver vessel.
+                    # Only set transient flags if Case A (active discharger) has NOT
+                    # already processed this vessel. Case A runs when the discharger
+                    # vessel (e.g. Rathbone) is iterated — it sets:
+                    #   _mto_transient_since_day = None  (transfer complete, berth mother)
+                    #   cargo_bbl += discharger volume   (e.g. 75k + 38k = 113k)
+                    #   _mto_berth_free_at = cast-off time
+                    # If we blindly re-set _mto_transient_since_day = 0 here, the auto-MTO
+                    # gate thinks Bagshot is still accepting dischargers and the berth lock
+                    # is cleared — Bagshot would try to berth a mother before Rathbone casts off.
+                    _already_processed_by_case_a = (
+                        getattr(v, "_mto_berth_free_at", 0.0) > 0
+                        or getattr(v, "_mto_transient_since_day", -1) is None
+                    )
+                    if not _already_processed_by_case_a:
+                        # Discharger not yet seeded (e.g. receiver processed first in loop,
+                        # or no active discharger paired). Mark as open transient so the sim
+                        # can route the discharger to this vessel when it arrives.
+                        v._mto_transient_since_day = 0
+                    # Always ensure receiver waits at BIA — never proceed to mother alone
                     v.status = "WAITING_BERTH_B"
+                    v.next_event_time = max(
+                        getattr(v, "_mto_berth_free_at", 0.0),
+                        v.next_event_time,
+                    )
 
                 # ── Nominated load ceiling (for PF_LOADING startup vessels) ────
                 # Prevents the Ibom vessel from jumping to full capacity on Day 1.
