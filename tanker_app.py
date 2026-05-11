@@ -8797,19 +8797,35 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             _html.append("</table></div>")
             _table_html = "\n".join(_html)
 
-            # ── Render in an iframe so JS runs (st.markdown strips <script>).
-            # Structure:
-            #   [top-bar]   top scrollbar strip — always visible, synced via JS
-            #   [.jmp-wrap] table — native bottom scrollbar appears automatically
+            # ── Render table in an iframe so <script> executes.
+            # The top scrollbar is position:sticky so it pins to the top of
+            # the iframe viewport as you scroll down the page — always visible.
+            # The bottom scrollbar is the native overflow of .jmp-wrap and is
+            # always visible at the foot of the iframe.
+            # scrolling=False + exact height means the iframe never gets its own
+            # vertical scrollbar — the page scrolls instead, which keeps both
+            # the sticky top bar and the native bottom bar permanently on screen.
             _iframe_css = """
-              html,body{margin:0;padding:0;background:#fff}
-              #top-bar{
-                overflow-x:scroll;overflow-y:hidden;
-                height:16px;margin-bottom:2px;
-                border-bottom:1px solid #d1d5db;background:#f9fafb;
+              *{box-sizing:border-box}
+              html,body{margin:0;padding:0;background:#fff;overflow:hidden}
+              #wrap{
+                overflow-x:auto;
+                overflow-y:visible;
               }
-              #top-bar-inner{height:1px;display:block}
-              .jmp-wrap{overflow-x:auto;padding:4px 0 0 0}
+              /* Sticky top scrollbar — always pinned to top of iframe viewport */
+              #top-scroll{
+                position:sticky;
+                top:0;
+                overflow-x:scroll;
+                overflow-y:hidden;
+                height:14px;
+                z-index:10;
+                background:#f1f5f9;
+                border-bottom:1px solid #cbd5e1;
+                border-top:1px solid #cbd5e1;
+              }
+              #top-scroll-inner{height:1px;display:block}
+              .jmp-wrap{overflow-x:auto;padding:0}
               .jmp-table{border-collapse:collapse;min-width:100%;font-size:11px;
                          font-family:'Segoe UI',system-ui,sans-serif}
               .jmp-table th{background:#1a2744;color:#ffffff;padding:5px 8px;
@@ -8835,28 +8851,41 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             _iframe_doc = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{_iframe_css}</style></head>
 <body>
-<div id="top-bar"><div id="top-bar-inner"></div></div>
-{_table_html}
+<div id="wrap">
+  <div id="top-scroll"><div id="top-scroll-inner"></div></div>
+  {_table_html}
+</div>
 <script>
 (function(){{
-  var bar   = document.getElementById('top-bar');
-  var inner = document.getElementById('top-bar-inner');
+  var top   = document.getElementById('top-scroll');
+  var inner = document.getElementById('top-scroll-inner');
   var wrap  = document.querySelector('.jmp-wrap');
-  if (!bar || !wrap) return;
+  if (!top || !wrap) return;
+
   function setWidth(){{
     var tbl = wrap.querySelector('table');
-    if (tbl) inner.style.width = tbl.scrollWidth + 'px';
+    if (tbl) {{
+      inner.style.width = tbl.scrollWidth + 'px';
+      // Tell Streamlit the exact content height so iframe fits perfectly
+      var h = document.body.scrollHeight;
+      window.parent.postMessage({{type:'jmp_height', h: h}}, '*');
+    }}
   }}
+
+  // Run after fonts/layout settle
   setWidth();
+  setTimeout(setWidth, 200);
+  setTimeout(setWidth, 600);
+
   var busy = false;
-  bar.addEventListener('scroll', function(){{
+  top.addEventListener('scroll', function(){{
     if (busy) return; busy = true;
-    wrap.scrollLeft = bar.scrollLeft;
+    wrap.scrollLeft = top.scrollLeft;
     busy = false;
   }});
   wrap.addEventListener('scroll', function(){{
     if (busy) return; busy = true;
-    bar.scrollLeft = wrap.scrollLeft;
+    top.scrollLeft = wrap.scrollLeft;
     busy = false;
   }});
   window.addEventListener('resize', setWidth);
@@ -8864,10 +8893,10 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
 </script>
 </body></html>"""
 
-            # Count actual <tr> tags for accurate height, 28px per row + 80px overhead
+            # Initial height estimate: 28px per <tr> + 20px top-scroll bar + 8px padding
             _tr_count  = _table_html.count('<tr')
-            _iframe_h  = min(max(_tr_count * 28 + 80, 300), 4000)
-            _stc.html(_iframe_doc, height=_iframe_h, scrolling=True)
+            _iframe_h  = min(max(_tr_count * 28 + 28, 300), 4200)
+            _stc.html(_iframe_doc, height=_iframe_h, scrolling=False)
 
             # ── Legend ─────────────────────────────────────────────────────────────────
             _leg_html = '<div style="margin:10px 0 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
