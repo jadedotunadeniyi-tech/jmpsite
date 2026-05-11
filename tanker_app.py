@@ -5229,10 +5229,13 @@ def main():
                 _comment      = _cell(rows, _r, 10).lower()
                 _next_comment = _cell(rows, _r, 25).lower()  # next-day comment col
 
-                # Assigned storage from Scheduled Loading columns
+                # Assigned storage from Scheduled Loading columns.
+                # Accept any non-empty cell value including sentinel "1" (written
+                # by the corrected CSV builder for zero-cargo vessels at a storage).
                 _stor = ""
                 for _c, _sn in _STOR_COLS.items():
-                    if _num(rows, _r, _c) != 0:
+                    _raw_cv = _cell(rows, _r, _c).strip()
+                    if _raw_cv and _raw_cv != "0" and _raw_cv != "":
                         _stor = _sn
                         break
 
@@ -5322,6 +5325,33 @@ def main():
                     _status = "IDLE_A"
                 else:
                     _status = "SAILING_AB_LEG2" if _cargo > 0 else "IDLE_A"
+
+                # ── Direct status override from col 10 ─────────────────────
+                # The corrected CSV builder writes the confirmed status code into
+                # col 10.  When the value is a known sim status code, use it
+                # directly and skip the comment-heuristic inferred status.
+                # This ensures JasmineS/Westmore vessels with CAST_OFF, IDLE_A,
+                # HOSE_CONNECT_A etc. round-trip exactly as confirmed.
+                _DIRECT_STATUSES = {
+                    "LOADING","IDLE_A","HOSE_CONNECT_A","BERTHING_A","CAST_OFF","DOCUMENTING",
+                    "WAITING_STOCK","WAITING_DEAD_STOCK","WAITING_BERTH_A","WAITING_CAST_OFF",
+                    "HOSE_CONNECT_B","BERTHING_B","WAITING_BERTH_B","WAITING_MOTHER_CAPACITY",
+                    "CAST_OFF_B","IDLE_B","SAILING_AB","SAILING_AB_LEG2","SAILING_BA",
+                    "SAILING_D_CHANNEL","PF_LOADING","PF_SWAP",
+                }
+                _col10_raw = _cell(rows, _r, 10)   # builder writes status code here
+                if _col10_raw in _DIRECT_STATUSES:
+                    # Only override when MTO-specific logic hasn't already taken over
+                    # (MTO receiver/discharger assignments are controlled above)
+                    if not (_vname == _mto_receiver_name or _vname in _mto_dischargers):
+                        _status = _col10_raw
+                        # Re-derive storage/mother from storage cols when status overridden
+                        # (ensures _stor and _mom are consistent with overridden status)
+                        if _status in {"HOSE_CONNECT_B","BERTHING_B","WAITING_BERTH_B",
+                                       "WAITING_MOTHER_CAPACITY","CAST_OFF_B","IDLE_B"}:
+                            # BIA status — storage col doesn't apply, keep _mom from cols
+                            pass
+                        # For storage statuses, _stor is already set from _STOR_COLS scan
 
                 _is_recv = (_vname == _mto_receiver_name)
                 # mto_target_vessel set for both active dischargers AND inbound queued dischargers
@@ -5518,9 +5548,12 @@ def main():
                     _dr[9]  = _cargo
                     _dr[10] = _evt
 
-                    # Storage loading columns
+                    # Storage loading columns.
+                    # Write sentinel "1" when cargo=0 but storage is assigned — the
+                    # parser's _cell() != "0" check detects it and sets _stor correctly,
+                    # ensuring zero-cargo vessels (IDLE_A, CAST_OFF etc.) round-trip.
                     if _stor in _stor_col:
-                        _dr[_stor_col[_stor]] = _cargo
+                        _dr[_stor_col[_stor]] = _cargo if _cargo > 0 else 1
 
                     # Mother discharge columns (normal BIA discharge)
                     if _mom in _mom_col and not _is_recv and not _mto_tv:

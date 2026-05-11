@@ -2337,6 +2337,22 @@ class Simulation:
             self.mtsanbarth_daughters_loaded >= _effective_min_threshold
         )
 
+        # ── MTO receiver suppression ──────────────────────────────────────────
+        # When any MTO receiver (transient vessel accumulating cargo) is waiting
+        # at BIA for a primary mother berth, block MTSanBarth from starting a
+        # new transload cycle.  This ensures primary-mother berths stay available
+        # for the MTO receiver's discharge, which has operational priority.
+        # Exception: if MTSanBarth is at ≥90% capacity (genuine overflow risk),
+        # the emergency drain is allowed regardless of MTO status.
+        _mto_recv_waiting = any(
+            getattr(vv, "_mto_transient_since_day", None) is not None
+            and vv.status in {"WAITING_BERTH_B", "WAITING_MOTHER_CAPACITY"}
+            for vv in self.vessels
+        )
+        _sj_emergency = sj_vol >= sj_cap * 0.90   # genuine overflow risk
+        if _mto_recv_waiting and not _sj_emergency:
+            return None, None, 0
+
         # T1 — MTSanBarth at ≥75% capacity: force drain immediately (no gate).
         # Only starts if a target has space for the ENTIRE MTSanBarth volume
         # (single-berth rule).  If no mother qualifies, MTSanBarth waits at anchor.
