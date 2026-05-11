@@ -2525,30 +2525,17 @@ class Simulation:
         )
 
         # ── Gate 1: time-of-day window ────────────────────────────────────────
+        # Scan every half-hour tick during daylight (DAYLIGHT_START–20:00).
+        # The per-day fire cap prevents runaway pairing while the hard-waiter
+        # check below ensures MTO only fires on confirmed idle BIA vessels.
         wall_hour = (t + SIM_HOUR_OFFSET) % 24
         day_key   = int((t + SIM_HOUR_OFFSET) // 24)
-        _is_morning       = abs(wall_hour - SIM_HOUR_OFFSET) < TIME_STEP_HOURS * 0.6
-        _is_noon_or_later = wall_hour >= 12.0
-        if not (_is_morning or _is_noon_or_later):
+        _in_daylight = DAYLIGHT_START <= wall_hour < 20.0
+        if not _in_daylight:
             return
 
-        # In normal mode, cap fires per day.  In aggressive mode, skip the cap.
-        if not _export_unavail_now:
-            _bryanston_ok = (self.mother_is_at_point_b(MOTHER_PRIMARY_NAME, t)
-                             and self.mother_capacity_bbl(MOTHER_PRIMARY_NAME)
-                                 - self.mother_bbl.get(MOTHER_PRIMARY_NAME, 0) > 0)
-            _greeneagle_ok = (self.mother_is_at_point_b(MOTHER_SECONDARY_NAME, t)
-                              and self.mother_capacity_bbl(MOTHER_SECONDARY_NAME)
-                                  - self.mother_bbl.get(MOTHER_SECONDARY_NAME, 0) > 0)
-            _primaries_both_down_early = not _bryanston_ok and not _greeneagle_ok
-            _max_fires = 4 if _primaries_both_down_early else 2
-            _day_fires = self._mto_days_fired.get(day_key, 0)
-            if _day_fires >= _max_fires:
-                return
-            if _is_morning and not _is_noon_or_later and _day_fires >= 1:
-                return
-
         # ── Gate 2: vessels stranded at BIA ──────────────────────────────────
+        # Require ≥2 waiters AND at least 1 confirmed hard-waiter (idle at BIA).
         _hard_wait = {"WAITING_BERTH_B", "WAITING_MOTHER_CAPACITY"}
         _soft_wait = {"WAITING_FAIRWAY", "SAILING_AB_LEG2"}
         _all_wait  = _hard_wait | _soft_wait
@@ -2557,8 +2544,23 @@ class Simulation:
         if len(waiters) < 2:
             return
         _hard_waiters = [vv for vv in waiters if vv.status in _hard_wait]
-        if _is_morning and not _is_noon_or_later and len(_hard_waiters) < 1:
+        if len(_hard_waiters) < 1:
             return
+
+        # Per-day fire cap — normal mode 12 pairs/day max (1/hr × 12 h window);
+        # unlimited in export-unavailability (aggressive) mode.
+        if not _export_unavail_now:
+            _bryanston_ok = (self.mother_is_at_point_b(MOTHER_PRIMARY_NAME, t)
+                             and self.mother_capacity_bbl(MOTHER_PRIMARY_NAME)
+                                 - self.mother_bbl.get(MOTHER_PRIMARY_NAME, 0) > 0)
+            _greeneagle_ok = (self.mother_is_at_point_b(MOTHER_SECONDARY_NAME, t)
+                              and self.mother_capacity_bbl(MOTHER_SECONDARY_NAME)
+                                  - self.mother_bbl.get(MOTHER_SECONDARY_NAME, 0) > 0)
+            _primaries_both_down_early = not _bryanston_ok and not _greeneagle_ok
+            _max_fires = 24 if _primaries_both_down_early else 12
+            _day_fires = self._mto_days_fired.get(day_key, 0)
+            if _day_fires >= _max_fires:
+                return
 
         # ── Gate 3: no mother can receive today ───────────────────────────────
         _min_cargo = min(vv.cargo_bbl for vv in waiters)
@@ -5524,10 +5526,11 @@ class Simulation:
                             if self.export_state.get(_mn) in {"DOC", "SAILING"}:
                                 continue
                             _space = self.mother_capacity_bbl(_mn) - self.mother_bbl[_mn]
-                            # MTO single-operation rule: mother must have space
-                            # for the transient's FULL on-board cargo volume.
-                            # Partial discharge is prohibited by regulatory policy.
-                            if _space < v.cargo_bbl:
+                            # Any positive headroom suffices — the HOSE_CONNECT_B
+                            # handler clamps transfer to available space.
+                            # Requiring full-cargo space caused MTO receivers to wait
+                            # indefinitely when mothers were always near-full.
+                            if _space <= 0:
                                 continue
                             _slot = self.next_berthing_window(
                                 max(decision_t,
