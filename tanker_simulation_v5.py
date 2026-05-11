@@ -2440,85 +2440,73 @@ class Simulation:
     # MULTIPLE TRANSIENT OPERATION (MTO)
     # ------------------------------------------------------------------
     def _maybe_run_multiple_transient_op(self, t):
-        """Fire at 08:00 AND at the first tick >=12:00 each day (max once/day).
+        """Fire at 08:00 AND at the first tick >=12:00 each day.
 
-        Why two windows:
-          08:00 — matches the morning position report. If >=2 vessels are
-                  already confirmed idle at BIA (hard-wait), act immediately
-                  so the discharger can cast off and catch morning tide.
-          12:00 — midday fallback for situations not yet clear at 08:00
-                  (e.g. vessels that arrived at BIA mid-morning).
+        Normal mode (export available):
+          Single-pair MTO — one transient accumulates parcels until a mother
+          berth opens.  Parcel limit = MTO_MAX_PARCELS_BEFORE_OFFLOAD (1) or
+          MTO_MAX_PARCELS_ESCALATED (3) when both primaries are down.
 
-        Gate 3 (cannot berth today) explicitly accounts for MTSanBarth's active
-        transload, which ties up a primary mother berth for 40+ hours at
-        10,000 bph — mother_berth_free_at alone understates the blockage.
-
-        Transient capacity:
-          MTO_TRANSIENT_CAPACITY_BBL is a ceiling, not a loading target.
-          Transfer is clamped to headroom; transient discharges opportunistically
-          every hourly tick as soon as any mother berth window opens.
-
-        MTO_MAX_PARCELS_BEFORE_OFFLOAD:
-          Gates only further top-ups while the transient awaits a berth.
-          Never delays the transient's offload.
+        Aggressive mode (export_unavailability window active):
+          Multi-pair MTO — every idle large vessel becomes a receiver; every
+          idle small vessel discharges to the nearest available receiver.
+          Watson can load from Woodstock while Sherlock loads from Bagshot
+          simultaneously.  SantaMonica discharges to any receiver.
+          No per-day fire limit — the function forms as many pairs as the
+          waiters allow on each tick.
+          Each receiver fills to its full MTO_TRANSIENT_CAPACITY_BBL, only
+          offloading to a mother once a berth genuinely opens.
         """
         if not MULTIPLE_TRANSIENT_OPERATION:
             return
 
-        # ── Gate 1: 08:00 or first tick >=12:00, up to 2 per calendar day ───────
+        # ── Is export blocked right now? ─────────────────────────────────────
+        _export_unavail_now = any(
+            _eu_s <= t < _eu_e
+            for (_eu_s, _eu_e) in getattr(self, 'export_unavailability_windows', [])
+        )
+
+        # ── Gate 1: time-of-day window ────────────────────────────────────────
         wall_hour = (t + SIM_HOUR_OFFSET) % 24
         day_key   = int((t + SIM_HOUR_OFFSET) // 24)
         _is_morning       = abs(wall_hour - SIM_HOUR_OFFSET) < TIME_STEP_HOURS * 0.6
         _is_noon_or_later = wall_hour >= 12.0
         if not (_is_morning or _is_noon_or_later):
             return
-        # Allow up to 2 MTO nominations per day normally; 4 when both primaries are down
-        # (we check both-primaries-down later, but use a quick pre-check here)
-        _bryanston_ok = (self.mother_is_at_point_b(MOTHER_PRIMARY_NAME, t)
-                         and self.mother_capacity_bbl(MOTHER_PRIMARY_NAME)
-                             - self.mother_bbl.get(MOTHER_PRIMARY_NAME, 0) > 0)
-        _greeneagle_ok = (self.mother_is_at_point_b(MOTHER_SECONDARY_NAME, t)
-                          and self.mother_capacity_bbl(MOTHER_SECONDARY_NAME)
-                              - self.mother_bbl.get(MOTHER_SECONDARY_NAME, 0) > 0)
-        _primaries_both_down_early = not _bryanston_ok and not _greeneagle_ok
-        _max_fires = 4 if _primaries_both_down_early else 2
-        _day_fires = self._mto_days_fired.get(day_key, 0)
-        if _day_fires >= _max_fires:
-            return
-        # Morning window: fire only if not already fired today
-        if _is_morning and not _is_noon_or_later and _day_fires >= 1:
-            return
 
-        # ── Gate 2: >=1 shuttle vessel stranded at Point B ───────────────────
-        # Also check MTSanBarth — if MTSanBarth is available AND has space, vessels
-        # should be routed to her instead of triggering MTO.
+        # In normal mode, cap fires per day.  In aggressive mode, skip the cap.
+        if not _export_unavail_now:
+            _bryanston_ok = (self.mother_is_at_point_b(MOTHER_PRIMARY_NAME, t)
+                             and self.mother_capacity_bbl(MOTHER_PRIMARY_NAME)
+                                 - self.mother_bbl.get(MOTHER_PRIMARY_NAME, 0) > 0)
+            _greeneagle_ok = (self.mother_is_at_point_b(MOTHER_SECONDARY_NAME, t)
+                              and self.mother_capacity_bbl(MOTHER_SECONDARY_NAME)
+                                  - self.mother_bbl.get(MOTHER_SECONDARY_NAME, 0) > 0)
+            _primaries_both_down_early = not _bryanston_ok and not _greeneagle_ok
+            _max_fires = 4 if _primaries_both_down_early else 2
+            _day_fires = self._mto_days_fired.get(day_key, 0)
+            if _day_fires >= _max_fires:
+                return
+            if _is_morning and not _is_noon_or_later and _day_fires >= 1:
+                return
+
+        # ── Gate 2: vessels stranded at BIA ──────────────────────────────────
         _hard_wait = {"WAITING_BERTH_B", "WAITING_MOTHER_CAPACITY"}
         _soft_wait = {"WAITING_FAIRWAY", "SAILING_AB_LEG2"}
         _all_wait  = _hard_wait | _soft_wait
-        waiters = [
-            vv for vv in self.vessels
-            if vv.status in _all_wait
-            and vv.cargo_bbl > 0
-        ]
-        if len(waiters) < 1:
+        waiters = [vv for vv in self.vessels
+                   if vv.status in _all_wait and vv.cargo_bbl > 0]
+        if len(waiters) < 2:
             return
-        # At 08:00 only fire if >=1 is already confirmed idle (hard-wait)
         _hard_waiters = [vv for vv in waiters if vv.status in _hard_wait]
         if _is_morning and not _is_noon_or_later and len(_hard_waiters) < 1:
             return
 
-        # ── Gate 3: vessels genuinely cannot berth today ──────────────────────
-        # Check ALL mothers including MTSanBarth.  If MTSanBarth has space AND
-        # her berth is free before daylight end, vessels should be routed to
-        # her — MTO should not fire while MTSanBarth remains an idle option.
-        # Also account for MTSanBarth's active transload tying up a primary berth.
+        # ── Gate 3: no mother can receive today ───────────────────────────────
         _min_cargo = min(vv.cargo_bbl for vv in waiters)
-
         _sj_blocks_mother = None
         if self.mtsanbarth_status in {"BERTHING_B", "HOSE_CONNECT_B", "DISCHARGING"}:
             _sj_blocks_mother = self.mtsanbarth_target
-
-        # Check all mothers including MTSanBarth for space
         receiver_available = False
         for mn in MOTHER_NAMES:
             if not self.mother_is_at_point_b(mn, t):
@@ -2526,7 +2514,6 @@ class Simulation:
             if self.mother_capacity_bbl(mn) - self.mother_bbl[mn] >= _min_cargo:
                 receiver_available = True
                 break
-
         _daylight_end_t = (int((t + SIM_HOUR_OFFSET) // 24) * 24
                            + DAYLIGHT_END - SIM_HOUR_OFFSET)
         berth_free_before_daylight = False
@@ -2537,10 +2524,8 @@ class Simulation:
                 if self.mother_capacity_bbl(mn) - self.mother_bbl[mn] < _min_cargo:
                     continue
                 berth_free_at = self.mother_berth_free_at.get(mn, 0.0)
-                # MTSanBarth's active transload blocks the target primary mother
                 if mn == _sj_blocks_mother and self.mtsanbarth_next_t is not None:
                     berth_free_at = max(berth_free_at, self.mtsanbarth_next_t)
-                # MTSanBarth's OWN berth is blocked while she is actively pumping
                 if mn == MOTHER_QUATERNARY_NAME and self.mtsanbarth_status in {
                     "BERTHING_B", "HOSE_CONNECT_B", "DISCHARGING"
                 }:
@@ -2549,17 +2534,10 @@ class Simulation:
                 if berth_free_at <= _daylight_end_t:
                     berth_free_before_daylight = True
                     break
-
         if receiver_available and berth_free_before_daylight:
             return
 
-        # ── All gates passed — record this fire ──────────────────────────────
-        self._mto_days_fired[day_key] = self._mto_days_fired.get(day_key, 0) + 1
-
-        # Check if BOTH primary mothers (Bryanston + GreenEagle) are simultaneously
-        # unavailable — either at export, full, or manually blocked.  When true,
-        # escalate MTO aggressiveness: raise parcel limit, allow up to 2 MTO fires
-        # per day, and fill large vessels (230k → 125k → smaller) before smaller.
+        # ── Escalation flags ──────────────────────────────────────────────────
         _bryanston_available = (
             self.mother_is_at_point_b(MOTHER_PRIMARY_NAME, t)
             and (self.mother_capacity_bbl(MOTHER_PRIMARY_NAME)
@@ -2571,26 +2549,31 @@ class Simulation:
                  - self.mother_bbl[MOTHER_SECONDARY_NAME]) >= _min_cargo
         )
         _both_primaries_down = not _bryanston_available and not _greeneagle_available
-
-        # Export unavailability: treat as equivalent to both primaries down for
-        # MTO aggressiveness — raise parcel limit so the MTO vessel fills to its
-        # maximum transient capacity, maximising BIA stock accumulation while
-        # export is blocked.  Field storages drain faster; daughters return sooner.
-        _export_unavail_now = any(
-            _eu_s <= t < _eu_e
-            for (_eu_s, _eu_e) in getattr(self, 'export_unavailability_windows', [])
-        )
         _escalate_mto = _both_primaries_down or _export_unavail_now
         _effective_parcel_limit = (
             MTO_MAX_PARCELS_ESCALATED if _escalate_mto
             else MTO_MAX_PARCELS_BEFORE_OFFLOAD
         )
 
+        # ─────────────────────────────────────────────────────────────────────
+        # AGGRESSIVE MULTI-PAIR mode (export unavailability active)
+        # ─────────────────────────────────────────────────────────────────────
+        if _export_unavail_now:
+            self._mto_run_aggressive_pairs(
+                t, day_key, waiters, _hard_wait, _effective_parcel_limit
+            )
+            return
+
+        # ─────────────────────────────────────────────────────────────────────
+        # NORMAL SINGLE-PAIR mode
+        # ─────────────────────────────────────────────────────────────────────
+        self._mto_days_fired[day_key] = self._mto_days_fired.get(day_key, 0) + 1
+
+        # ── Helper: MTO cap ───────────────────────────────────────────────────
+        def _mto_cap(vv):
+            return MTO_TRANSIENT_CAPACITY_BBL.get(vv.name, vv.cargo_capacity)
+
         # ── Check for an existing active transient to top up ──────────────────
-        # Also detect vessels that have _is_mto_offload=True (claimed a berth
-        # but may have re-anchored after an abort) — they still hold consolidated
-        # cargo and may have headroom for another parcel, preventing a redundant
-        # new transient nomination when one is already in progress.
         existing_transient = next(
             (vv for vv in waiters
              if (getattr(vv, "_mto_transient_since_day", None) is not None
@@ -2600,14 +2583,8 @@ class Simulation:
 
         if existing_transient is not None:
             _parcels_so_far = getattr(existing_transient, "_mto_parcels_received", 0)
-            _trn_cap  = MTO_TRANSIENT_CAPACITY_BBL.get(
-                existing_transient.name, existing_transient.cargo_capacity)
+            _trn_cap  = _mto_cap(existing_transient)
             _headroom = max(0.0, _trn_cap - existing_transient.cargo_bbl)
-
-            # Check if any vessel is queued specifically for this transient via
-            # _mto_target_vessel (startup-seeded queued discharger, e.g. Rathbone).
-            # If so, suppress the parcel-limit block — the arrival handler will
-            # route the queued vessel directly without going through the auto gate.
             _has_queued_discharger = any(
                 getattr(vv, "_mto_target_vessel", None) == existing_transient.name
                 for vv in self.vessels
@@ -2618,62 +2595,36 @@ class Simulation:
                     f"[MTO Day {day_key+1}] No further top-ups — "
                     f"{'parcel limit reached' if _parcels_so_far >= _effective_parcel_limit else 'at capacity'} "
                     f"({existing_transient.cargo_bbl:,.0f}/{_trn_cap:,.0f} bbl) | "
-                    f"{'ESCALATED (export unavail)' if _export_unavail_now else 'ESCALATED (both primaries down)' if _both_primaries_down else 'normal limit'} | "
+                    f"{'ESCALATED (both primaries down)' if _both_primaries_down else 'normal limit'} | "
                     f"awaiting opportunistic mother berth",
                     voyage_num=existing_transient.current_voyage,
                 )
                 return
             elif (_parcels_so_far >= _effective_parcel_limit or _headroom <= 0) and _has_queued_discharger:
-                # Queued discharger will arrive and use the arrival handler — skip auto gate
                 return
 
             remaining = [vv for vv in waiters if vv is not existing_transient]
             if not remaining:
                 return
-            # Only allow a discharger whose full cargo fits in the existing
-            # transient's remaining headroom — partial transfers would leave the
-            # discharger with cargo it cannot place, defeating the MTO purpose.
-            # Also require the discharger is not larger (by MTO cap) than the
-            # transient — the bigger vessel must always be the transient.
-            _trn_cap_existing = MTO_TRANSIENT_CAPACITY_BBL.get(
-                existing_transient.name, existing_transient.cargo_capacity)
+            _trn_cap_existing = _mto_cap(existing_transient)
             _fits_topup = [
                 vv for vv in remaining
                 if vv.cargo_bbl <= _headroom
-                and MTO_TRANSIENT_CAPACITY_BBL.get(vv.name, vv.cargo_capacity) <= _trn_cap_existing
+                and _mto_cap(vv) <= _trn_cap_existing
             ]
             if not _fits_topup:
-                # No eligible discharger — don't do a partial/wrong-size transfer
                 return
             discharger_v = min(_fits_topup, key=lambda vv: vv.cargo_bbl)
             transient_v  = existing_transient
             transfer_bbl = min(discharger_v.cargo_bbl, _headroom)
         else:
             # ── Nominate a new transient ──────────────────────────────────────
-            # Rules (in priority order):
-            #  1. Hard-wait (confirmed idle at BIA) is strongly preferred over
-            #     soft-wait (still en-route) for both transient and discharger.
-            #  2. The vessel with the LARGEST MTO transient capacity is nominated
-            #     as transient — it must be able to absorb the smaller vessel's
-            #     full cargo.  A smaller vessel must NEVER be the transient when
-            #     a larger-capacity vessel is available and has headroom.
-            #  3. Among candidates of equal size, most headroom wins.
-            #  4. The discharger must be a strictly smaller vessel (by MTO cap)
-            #     whose full cargo fits in the transient's headroom.  If no
-            #     such vessel exists the MTO is aborted for this tick.
-
-            def _mto_cap(vv):
-                return MTO_TRANSIENT_CAPACITY_BBL.get(vv.name, vv.cargo_capacity)
-
             def _nom_score(vv):
                 cap    = _mto_cap(vv)
                 hdroom = max(0.0, cap - vv.cargo_bbl)
                 hard_bonus = 1_000_000 if vv.status in _hard_wait else 0
-                # Primary sort: largest MTO capacity (bigger vessel = better transient)
-                # Secondary: most headroom; hard-wait bonus applied on top
                 return cap * 10_000 + hdroom + hard_bonus
 
-            # Exclude vessels that are never eligible to be MTO transient (receiver)
             _eligible_transients = [vv for vv in waiters
                                     if vv.name not in MTO_NEVER_RECEIVER]
             if not _eligible_transients:
@@ -2682,24 +2633,16 @@ class Simulation:
             transient_v   = waiters_scored[0]
             _trn_cap      = _mto_cap(transient_v)
             _headroom     = max(0.0, _trn_cap - transient_v.cargo_bbl)
-
             if _headroom <= 0:
                 return
 
-            # Discharger must be a vessel smaller than the transient (by MTO cap)
-            # whose full cargo fits cleanly in the transient's headroom.
-            # This enforces the rule: bigger vessel = transient, smaller = discharger.
             remaining = [vv for vv in waiters if vv is not transient_v]
             if not remaining:
-                # Only one waiter — cannot do a vessel-to-vessel transfer;
-                # MTO requires at least two vessels (one transient, one discharger).
                 return
-            # Prefer: smaller MTO cap AND full cargo fits in headroom (clean transfer)
             _fits_clean = [
                 vv for vv in remaining
                 if vv.cargo_bbl <= _headroom and _mto_cap(vv) <= _trn_cap
             ]
-            # Fallback: any vessel whose cargo (even partial) fits in headroom
             _fits_partial = [vv for vv in remaining if vv.cargo_bbl <= _headroom]
 
             if _fits_clean:
@@ -2707,35 +2650,147 @@ class Simulation:
             elif _fits_partial:
                 discharger_v = min(_fits_partial, key=lambda vv: vv.cargo_bbl)
             else:
-                # No vessel's cargo fits in the transient's headroom — abort.
-                # This prevents a large vessel being forced to partially discharge
-                # into a smaller transient that cannot hold its full cargo.
                 return
 
             transfer_bbl = min(discharger_v.cargo_bbl, _headroom)
-
             transient_v._mto_transient_since_day = day_key
             transient_v._mto_parcels_received    = 0
 
         if transfer_bbl <= 0:
             return
 
-        # ── Serialisation check ───────────────────────────────────────────────
-        # The discharger-to-transient pump must complete (including cast-off) before
-        # the next discharger can berth.  Apply the same timing as a normal BIA
-        # discharge: BERTHING_DELAY + HOSE_CONNECTION + pump time + CAST_OFF.
-        # _mto_berth_free_at on the transient vessel tracks when the next discharger
-        # may begin its approach.  If a transfer is still running, do not nominate.
+        self._mto_execute_pair(
+            t, day_key, transient_v, discharger_v, transfer_bbl, _escalate_mto
+        )
+
+    def _mto_run_aggressive_pairs(self, t, day_key, waiters, hard_wait_set, parcel_limit):
+        """Form as many concurrent transient/discharger pairs as possible.
+
+        During export unavailability every eligible large vessel becomes a
+        receiver filling to its MTO capacity; every small vessel discharges to
+        the nearest available receiver.  Multiple pairs operate simultaneously:
+            Watson  ← Woodstock      (both waiting at BIA)
+            Sherlock ← Bagshot       (both waiting at BIA)
+            SantaMonica → any receiver with headroom
+
+        Rules:
+          - Receivers: any waiter NOT in MTO_NEVER_RECEIVER, ordered by
+            MTO transient capacity descending.
+          - Each receiver can hold only one discharger at a time
+            (serialised by _mto_berth_free_at).
+          - A vessel already acting as receiver for this day (flagged by
+            _mto_transient_since_day) continues to accept top-up parcels
+            until it reaches its MTO capacity.
+          - SantaMonica / Rahama (MTO_NEVER_RECEIVER) can only be dischargers.
+          - Discharger assigned to the receiver with most remaining headroom
+            whose berth is currently free.
+        """
+        def _mto_cap(vv):
+            return MTO_TRANSIENT_CAPACITY_BBL.get(vv.name, vv.cargo_capacity)
+
+        # Separate receivers and potential dischargers from the waiter pool
+        # A vessel can switch roles mid-day: if a previously nominated receiver
+        # has filled to capacity it should not accept new dischargers.
+        _receivers = sorted(
+            [vv for vv in waiters if vv.name not in MTO_NEVER_RECEIVER],
+            key=lambda vv: _mto_cap(vv),
+            reverse=True,   # largest capacity first
+        )
+        _all_pairs_fired = 0
+
+        # Track which vessels have been assigned in this tick to avoid
+        # assigning the same vessel to two roles simultaneously.
+        _assigned = set()
+
+        for recv in _receivers:
+            if recv.name in _assigned:
+                continue
+
+            _trn_cap  = _mto_cap(recv)
+            _headroom = max(0.0, _trn_cap - recv.cargo_bbl)
+
+            # Skip receiver if berth is already locked (transfer in progress)
+            _berth_free = getattr(recv, "_mto_berth_free_at", 0.0)
+            if _berth_free > t:
+                _assigned.add(recv.name)  # still a receiver, just busy
+                continue
+
+            # Skip if receiver is already at capacity
+            if _headroom <= 0:
+                _assigned.add(recv.name)
+                continue
+
+            # Enforce parcel limit per receiver per stay (prevents endless top-ups
+            # if a discharger keeps arriving before the receiver offloads)
+            _parcels = getattr(recv, "_mto_parcels_received", 0)
+            if _parcels >= parcel_limit:
+                _assigned.add(recv.name)
+                continue
+
+            # Find best discharger: not assigned, fits in headroom, smaller cap
+            _candidates = [
+                vv for vv in waiters
+                if vv is not recv
+                and vv.name not in _assigned
+                and vv.cargo_bbl > 0
+                and vv.cargo_bbl <= _headroom
+                and _mto_cap(vv) <= _trn_cap
+            ]
+            if not _candidates:
+                # Try any vessel that fits (even same cap — fallback for tiny pools)
+                _candidates = [
+                    vv for vv in waiters
+                    if vv is not recv
+                    and vv.name not in _assigned
+                    and vv.cargo_bbl > 0
+                    and vv.cargo_bbl <= _headroom
+                ]
+            if not _candidates:
+                continue
+
+            # Prefer hard-waiters; among those pick smallest cargo for fastest return
+            _hard = [vv for vv in _candidates if vv.status in hard_wait_set]
+            _pool = _hard if _hard else _candidates
+            discharger_v = min(_pool, key=lambda vv: vv.cargo_bbl)
+
+            transfer_bbl = min(discharger_v.cargo_bbl, _headroom)
+            if transfer_bbl <= 0:
+                continue
+
+            # Initialise receiver tracking on first nomination this stay
+            if getattr(recv, "_mto_transient_since_day", None) is None:
+                recv._mto_transient_since_day = day_key
+                recv._mto_parcels_received    = 0
+
+            self._mto_execute_pair(
+                t, day_key, recv, discharger_v, transfer_bbl, escalated=True
+            )
+            _assigned.add(recv.name)
+            _assigned.add(discharger_v.name)
+            _all_pairs_fired += 1
+
+        if _all_pairs_fired:
+            self._mto_days_fired[day_key] = (
+                self._mto_days_fired.get(day_key, 0) + _all_pairs_fired
+            )
+
+    def _mto_execute_pair(self, t, day_key, transient_v, discharger_v,
+                          transfer_bbl, escalated=False):
+        """Execute one vessel-to-vessel MTO transfer with full BIA timing.
+
+        Separated from _maybe_run_multiple_transient_op so both the single-pair
+        normal mode and the multi-pair aggressive mode share the same physics
+        and logging.
+        """
+        def _mto_cap(vv):
+            return MTO_TRANSIENT_CAPACITY_BBL.get(vv.name, vv.cargo_capacity)
+
+        # Serialisation: berth locked until previous discharger casts off
         _transient_berth_free = getattr(transient_v, "_mto_berth_free_at", 0.0)
         if _transient_berth_free > t:
             return
 
-        # ── Execute vessel-to-vessel transfer ─────────────────────────────────
-        # Apply full BIA timing so discharge is serial, not concurrent:
-        #   BERTHING_DELAY_HOURS (0.5h)
-        #   HOSE_CONNECTION_HOURS (2.0h)
-        #   pump time (cargo / discharge_rate)
-        #   CAST_OFF_HOURS (0.2h) before next discharger may approach
+        # Full BIA timing: berthing → hose → pump → cast-off
         _berth_start   = t + BERTHING_DELAY_HOURS
         _hose_start    = _berth_start + POST_BERTHING_START_GAP_HOURS
         _pump_start    = _hose_start + HOSE_CONNECTION_HOURS
@@ -2745,10 +2800,10 @@ class Simulation:
         cast_off_t     = self.next_cast_off_window(_pump_end)
         transfer_end_t = cast_off_t + CAST_OFF_HOURS
 
-        # Lock the transient berth until cast-off of this discharger completes
+        # Lock this receiver's berth until cast-off completes
         transient_v._mto_berth_free_at = transfer_end_t
 
-        # Blend API from discharger into transient
+        # Blend API
         _dis_api = self.vessel_api.get(discharger_v.name, 0.0)
         _trn_api = self.vessel_api.get(transient_v.name, 0.0)
         _trn_vol = transient_v.cargo_bbl
@@ -2761,25 +2816,24 @@ class Simulation:
         transient_v._mto_parcels_received = getattr(
             transient_v, "_mto_parcels_received", 0) + 1
 
-        # Discharger: locks BIA-equivalent berth at transient vessel for full
-        # berthing+hose+pump+castoff duration, then returns to load.
+        # Discharger: empty cargo, return to load
         discharger_v.cargo_bbl = 0
         self.vessel_api[discharger_v.name] = 0.0
         discharger_v.status          = "CAST_OFF_B"
         discharger_v.next_event_time = transfer_end_t
 
-        # Transient: remains WAITING_BERTH_B, fires half-step scan for mother berth
+        # Receiver: stays WAITING_BERTH_B, checks hourly for mother berth
         transient_v.status          = "WAITING_BERTH_B"
         transient_v.next_event_time = self.next_daylight_hourly_berth_check(t, point="B")
 
-        # ── Log ───────────────────────────────────────────────────────────────
-        _parcel_num = transient_v._mto_parcels_received
-        _cap_label  = MTO_TRANSIENT_CAPACITY_BBL.get(
-                          transient_v.name, transient_v.cargo_capacity)
+        # Logging
+        _parcel_num  = transient_v._mto_parcels_received
+        _cap_label   = _mto_cap(transient_v)
         _hdroom_left = max(0.0, _cap_label - transient_v.cargo_bbl)
+        _mode_tag    = "AGGRESSIVE-MULTI" if escalated else "NORMAL"
         self.log_event(
             t, transient_v.name, "MTO_TRANSIENT_NOMINATED",
-            f"[MTO Day {day_key+1} — Parcel {_parcel_num}/{'ESCALATED' if _escalate_mto else MTO_MAX_PARCELS_BEFORE_OFFLOAD}] "
+            f"[MTO {_mode_tag} Day {day_key+1} — Parcel {_parcel_num}] "
             f"Received {transfer_bbl:,.0f} bbl from {discharger_v.name} "
             f"@ {_dis_api:.2f}° API | on-board: {transient_v.cargo_bbl:,.0f} bbl "
             f"(cap {_cap_label:,.0f} bbl, {_hdroom_left:,.0f} bbl headroom remaining) | "
@@ -2788,7 +2842,7 @@ class Simulation:
         )
         self.log_event(
             t, discharger_v.name, "MTO_DISCHARGE_TO_TRANSIENT",
-            f"[MTO Day {day_key+1}] Berthing+hose+pump to {transient_v.name}: "
+            f"[MTO {_mode_tag} Day {day_key+1}] Berthing+hose+pump to {transient_v.name}: "
             f"{transfer_bbl:,.0f} bbl ({BERTHING_DELAY_HOURS:.1f}h berth + "
             f"{HOSE_CONNECTION_HOURS:.1f}h hose + {transfer_hours:.1f}h pump = "
             f"{BERTHING_DELAY_HOURS + HOSE_CONNECTION_HOURS + transfer_hours:.1f}h total) | "
@@ -2803,6 +2857,7 @@ class Simulation:
                 f"next discharger may berth after {self.hours_to_dt(transfer_end_t).strftime('%Y-%m-%d %H:%M')}",
                 voyage_num=discharger_v.current_voyage,
             )
+
     def _run_zeezee(self, t):
         """Monthly arrival trigger + full discharge state machine for ZeeZee.
 
