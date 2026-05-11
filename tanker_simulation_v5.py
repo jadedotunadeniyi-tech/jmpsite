@@ -1170,6 +1170,7 @@ class Simulation:
         # returns False for any t inside a window.  Daughters and MTSanBarth
         # transloads are automatically rerouted to available mothers.
         self.mother_unavailability_windows: dict = {name: [] for name in MOTHER_NAMES}
+        self.export_unavailability_windows: list = []   # list of (start_h, end_h) tuples
         self.point_b_day_assigned_mothers = {}
 
         # ── MTSanBarth — intermediate floating storage ─────────────────────────
@@ -5315,27 +5316,6 @@ class Simulation:
                 elif v.status == "WAITING_BERTH_B":
                     decision_t = t
 
-                    # ── MTO transient vessel: cannot berth while discharger is active ───
-                    # If a discharger is currently transferring cargo to this MTO receiver,
-                    # block it from berthing a mother vessel or transient storage until
-                    # the discharge (including cast-off) is complete.  This ensures the
-                    # MTO receiver accumulates the full incoming cargo before offloading.
-                    _mto_berth_free = getattr(v, "_mto_berth_free_at", 0.0)
-                    _is_mto_receiver = getattr(v, "_mto_transient_since_day", None) is not None
-                    if _is_mto_receiver and _mto_berth_free > decision_t:
-                        # Discharger still active — hold this vessel, do not allow berthing
-                        _next_check = self.next_daylight_hourly_berth_check(decision_t, point="B")
-                        v.next_event_time = max(_mto_berth_free, _next_check)
-                        self.log_event(
-                            decision_t, v.name, "WAITING_BERTH_B",
-                            f"[MTO receiver] Active MTO discharge in progress — "
-                            f"cannot berth mother or transient storage until "
-                            f"{self.hours_to_dt(_mto_berth_free).strftime('%Y-%m-%d %H:%M')} "
-                            f"(discharge cast-off complete)",
-                            voyage_num=v.current_voyage,
-                        )
-                        continue
-
                     # ── MTO transient vessel: opportunistic offload priority ───
                     # A transient vessel tries to berth at a primary mother on
                     # every hourly check — as soon as a window opens it takes it.
@@ -6323,6 +6303,34 @@ class Simulation:
                         if not self.export_ready_since[_mn]:
                             self.export_ready_since[_mn] = t
 
+                # ── Export unavailability block ───────────────────────────────
+                # If the current sim hour falls within any export unavailability
+                # window, suppress new export departures entirely.  Mothers that
+                # are already mid-export cycle (DOC/SAILING/HOSE/IN_PORT) are
+                # NOT interrupted — they complete normally.  We just skip the
+                # ready_candidates selection so no NEW exports start.
+                _eu_windows = getattr(self, 'export_unavailability_windows', [])
+                _export_blocked = any(
+                    _eu_s <= t < _eu_e for (_eu_s, _eu_e) in _eu_windows
+                )
+                if _export_blocked:
+                    # Log once per timestep entry into the window
+                    for (_eu_s, _eu_e) in _eu_windows:
+                        if abs(t - _eu_s) < TIME_STEP_HOURS * 0.5:
+                            self.log_event(
+                                t, "SYSTEM", "EXPORT_UNAVAILABLE_START",
+                                f"Export unavailability window active until "
+                                f"{self.hours_to_dt(_eu_e).strftime('%Y-%m-%d %H:%M')} — "
+                                f"mother vessels held at BIA"
+                            )
+                    # Log exit from window once
+                    for (_eu_s, _eu_e) in _eu_windows:
+                        if abs(t - _eu_e) < TIME_STEP_HOURS * 0.5:
+                            self.log_event(
+                                t, "SYSTEM", "EXPORT_UNAVAILABLE_END",
+                                "Export unavailability window ended — normal export operations resume"
+                            )
+
                 ready_candidates = []
                 for mother_name in MOTHER_NAMES:
                     # MTSanBarth never exports — it transloads to primary mothers instead
@@ -6333,6 +6341,7 @@ class Simulation:
                         and self.export_ready[mother_name]
                         and self.mother_export_departure_eligible(mother_name)
                         and t >= self.mother_available_at[mother_name]
+                        and not _export_blocked
                     ):
                         daughter_active_here = any(
                             vv.assigned_mother == mother_name
