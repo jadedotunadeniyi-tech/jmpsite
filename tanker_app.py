@@ -5160,7 +5160,7 @@ def main():
             #                        14=Duke   15=Ibom     17=Asaramatoru(not a sim storage)
             _STOR_COLS = {
                 11: "Chapel", 12: "JasmineS", 13: "Westmore", 14: "Duke", 15: "Ibom",
-                # col 17 = Asaramatoru field barge — not modelled as a sim storage, omitted
+                17: "PGM",   # col 17 = Asaramatoru field barge = PGM storage in sim
             }
             # Discharge @ BIA cols: 18=GreenEagle  19=Bryanston  20=MTSanBarth
             # Positive = mother is RECEIVING; negative on MTSanBarth row = it is DISCHARGING
@@ -5486,22 +5486,54 @@ def main():
                 for _ in range(4): _cw.writerow([""])  # rows 14-17
 
                 # Rows 18-28: daughter vessels
-                _stor_col = {"Chapel":11,"JasmineS":12,"Westmore":13,"Duke":14,"Ibom":15}
+                # Source from vp_vessel_states (user-confirmed edits) not raw parse,
+                # so MTO receiver/discharger selections and all manual edits are captured.
+                _vp_conf  = st.session_state.get("vp_vessel_states", {})
+                # Fall back to raw extracted list for vessels not in vp_vessel_states
+                _dv_lookup_raw = {d["name"]: d for d in _dv_conf}
+
+                # Column mapping — matches _parse_stock_csv expectations exactly:
+                #   col 11=Chapel  12=JasmineS  13=Westmore  14=Duke  15=Ibom  17=PGM(Asaramatoru)
+                #   col 18=GreenEagle  19=Bryanston  20=MTSanBarth
+                #   col 21=MTO: positive = receiver, negative = discharger
+                _stor_col = {"Chapel":11,"JasmineS":12,"Westmore":13,"Duke":14,"Ibom":15,"PGM":17}
                 _mom_col  = {"GreenEagle":18,"Bryanston":19,"MTSanBarth":20}
                 _ALL_DVS  = ["Sherlock","Laphroaig","Watson","Bedford","Balham",
                              "Amyla","Bagshot","Rahama","Rathbone","SantaMonica","Woodstock"]
-                # Build lookup from extracted daughter list
-                _dv_lookup = {d["name"]: d for d in _dv_conf}
+
                 for _dvn in _ALL_DVS:
-                    _dv = _dv_lookup.get(_dvn, {})
-                    _cargo = int(_dv.get("cargo_bbl", 0) or 0)
-                    _stor  = _dv.get("assigned_storage", "") or ""
-                    _mom   = _dv.get("target_mother", "") or ""
-                    _evt   = _dv.get("status", "") or ""
-                    _dr    = [""] * 26
-                    _dr[2] = _dvn; _dr[9] = _cargo; _dr[10] = _evt
-                    if _stor in _stor_col: _dr[_stor_col[_stor]] = _cargo
-                    if _mom  in _mom_col:  _dr[_mom_col[_mom]]   = _cargo
+                    # Prefer confirmed state; fall back to raw parse
+                    _vp  = _vp_conf.get(_dvn, {})
+                    _raw = _dv_lookup_raw.get(_dvn, {})
+
+                    _cargo    = int(_vp.get("cargo_bbl", _raw.get("cargo_bbl", 0)) or 0)
+                    _stor     = _vp.get("target_storage") or _raw.get("assigned_storage", "") or ""
+                    _mom      = _vp.get("target_mother")  or _raw.get("target_mother",   "") or ""
+                    _evt      = _vp.get("status",         _raw.get("status", "")) or ""
+                    _is_recv  = bool(_vp.get("is_mto_receiver",  _raw.get("is_mto_receiver",  False)))
+                    _mto_tv   = _vp.get("mto_target_vessel", _raw.get("mto_target_vessel", "")) or ""
+
+                    _dr = [""] * 26
+                    _dr[2]  = _dvn
+                    _dr[9]  = _cargo
+                    _dr[10] = _evt
+
+                    # Storage loading columns
+                    if _stor in _stor_col:
+                        _dr[_stor_col[_stor]] = _cargo
+
+                    # Mother discharge columns (normal BIA discharge)
+                    if _mom in _mom_col and not _is_recv and not _mto_tv:
+                        _dr[_mom_col[_mom]] = _cargo
+
+                    # MTO col 21:
+                    #   MTO receiver (Watson holding consolidated cargo):  positive cargo value
+                    #   MTO discharger (Amyla pumping into receiver):      negative cargo value
+                    if _is_recv:
+                        _dr[21] = _cargo          # positive → parser sees this as the receiver
+                    elif _mto_tv:
+                        _dr[21] = -_cargo         # negative → parser sees this as a discharger
+
                     _cw.writerow(_dr)
 
                 # Rows 29-31: mothers
