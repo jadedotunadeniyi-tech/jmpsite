@@ -8810,7 +8810,9 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
               html,body{margin:0;padding:0;background:#fff;overflow:hidden}
               #wrap{
                 overflow-x:auto;
-                overflow-y:visible;
+                overflow-y:auto;
+                max-height:600px;
+                position:relative;
               }
               /* Sticky top scrollbar — always pinned to top of iframe viewport */
               #top-scroll{
@@ -8825,7 +8827,19 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                 border-top:1px solid #cbd5e1;
               }
               #top-scroll-inner{height:1px;display:block}
-              .jmp-wrap{overflow-x:auto;padding:0}
+              /* Left scrollbar track for visual reference */
+              #left-scroll-track{
+                position:fixed;
+                left:0;
+                top:0;
+                width:16px;
+                height:100%;
+                background:#f1f5f9;
+                border-right:1px solid #cbd5e1;
+                z-index:5;
+                pointer-events:none;
+              }
+              .jmp-wrap{overflow-x:auto;overflow-y:auto;padding:0;padding-left:16px}
               .jmp-table{border-collapse:collapse;min-width:100%;font-size:11px;
                          font-family:'Segoe UI',system-ui,sans-serif}
               .jmp-table th{background:#1a2744;color:#ffffff;padding:5px 8px;
@@ -8846,11 +8860,18 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
               .jmp-bia-entry{display:inline-block;border-radius:4px;padding:2px 6px;
                              margin:1px 0;font-size:10px;font-weight:600;
                              white-space:nowrap;line-height:1.5}
+              /* Custom scrollbar styling for better visibility */
+              .jmp-wrap::-webkit-scrollbar{width:14px;height:14px}
+              .jmp-wrap::-webkit-scrollbar-track{background:#f1f5f9}
+              .jmp-wrap::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:7px}
+              .jmp-wrap::-webkit-scrollbar-thumb:hover{background:#94a3b8}
+              .jmp-wrap{scrollbar-width:thin;scrollbar-color:#cbd5e1 #f1f5f9}
             """
 
             _iframe_doc = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{_iframe_css}</style></head>
 <body>
+<div id="left-scroll-track"></div>
 <div id="wrap">
   <div id="top-scroll"><div id="top-scroll-inner"></div></div>
   {_table_html}
@@ -8893,9 +8914,10 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
 </script>
 </body></html>"""
 
-            # Initial height estimate: 28px per <tr> + 20px top-scroll bar + 8px padding
+            # Initial height estimate: 28px per <tr> + 20px top-scroll bar + 16px left-track + 8px padding
+            # With max-height:600px in CSS, iframe will show both horizontal and vertical scrollbars
             _tr_count  = _table_html.count('<tr')
-            _iframe_h  = min(max(_tr_count * 28 + 28, 300), 4200)
+            _iframe_h  = min(max(_tr_count * 28 + 28, 650), 4200)
             _stc.html(_iframe_doc, height=_iframe_h, scrolling=False)
 
             # ── Legend ─────────────────────────────────────────────────────────────────
