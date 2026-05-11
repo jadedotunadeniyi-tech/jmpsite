@@ -1626,7 +1626,7 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
     if opt_params_json:
         _opt_pr = json.loads(opt_params_json)
         for _mod_key, _pr_key in _OPT_KEYS:
-            if hasattr(mod, _mod_key):
+            if hasattr(mod, _mod_key) and _pr_key in _opt_pr:
                 _opt_orig[_mod_key] = getattr(mod, _mod_key)
                 setattr(mod, _mod_key, _opt_pr[_pr_key])
 
@@ -6890,6 +6890,9 @@ def main():
             "export_sail_window_start": _sel_scen["export_sail_window_start"],
             "berthing_start":           _sel_scen["berthing_start"],
             "berthing_end":             _sel_scen["berthing_end"],
+            "sj_optim_threshold":       _sel_scen.get("sj_optim_threshold", 0.25),
+            "sj_optim_min_space":       _sel_scen.get("sj_optim_min_space", 50_000),
+            "mto_max_parcels":          _sel_scen.get("mto_max_parcels", 1),
         })
     elif run_opt and _cached_best:
         # Use best params from the previous optimizer run (persisted across reruns)
