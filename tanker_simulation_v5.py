@@ -421,6 +421,10 @@ MTO_TRANSIENT_CAPACITY_BBL: dict = {
 # Setting this higher lets the transient absorb more stranded cargoes on
 # prolonged congested periods (e.g. mother away at export for 2+ days).
 # The optimizer sweeps this parameter when MTO is enabled.
+# Hours MTSanBarth is suppressed behind MTO priority before her priority is
+# restored (mirrors ZEEZEE_MAX_DAUGHTER_WAIT_HOURS logic).
+MTO_SJ_BACKPRESSURE_HOURS: float = 72.0   # 3 days
+
 MTO_MAX_PARCELS_BEFORE_OFFLOAD: int = 1       # base value when primaries available
 MTO_MAX_PARCELS_ESCALATED:     int = 3       # raised when BOTH primaries are down
 
@@ -1196,6 +1200,13 @@ class Simulation:
         # and MTSanBarth may not start a new transload cycle (fender prep before
         # berthing the next mother also uses this gate).
         self.mtsanbarth_fender_ready_t   = 0.0
+        # MTO-priority suppression timer for MTSanBarth.
+        # When an MTO receiver is waiting, MTSanBarth is blocked from taking
+        # new daughters so that primary-mother berths are freed for the MTO
+        # transient.  After MTO_SJ_BACKPRESSURE_HOURS (72 h = 3 days) of
+        # continuous suppression, MTSanBarth's priority is restored (ZeeZee
+        # style) until the MTO transient finally offloads.
+        self._sj_mto_blocked_since: float | None = None
         # mtsanbarth_daughters_loaded: number of daughter vessels that have
         # completed a full discharge to MTSanBarth since her last offload to a
         # primary mother.  MTSanBarth may not offload (T2/T3/T4) until this
@@ -2053,6 +2064,31 @@ class Simulation:
         else:
             earliest_primary_start = None
 
+        # ── MTO priority suppression of MTSanBarth ────────────────────────
+        # When any MTO receiver (transient vessel, _mto_transient_since_day set)
+        # is waiting at BIA, MTSanBarth is suppressed so that incoming daughters
+        # are directed to primary mothers instead, keeping those berths occupied
+        # and forcing the MTO transient to discharge sooner once a primary frees.
+        # After MTO_SJ_BACKPRESSURE_HOURS (3 days) of continuous suppression,
+        # MTSanBarth's priority is restored (ZeeZee-style back-pressure relief)
+        # so she is never starved indefinitely.
+        _mto_receiver_waiting = any(
+            getattr(vv, "_mto_transient_since_day", None) is not None
+            and vv.status in {"WAITING_BERTH_B", "WAITING_MOTHER_CAPACITY"}
+            for vv in self.vessels
+        )
+        if _mto_receiver_waiting:
+            # Start or continue the suppression timer
+            if self._sj_mto_blocked_since is None:
+                self._sj_mto_blocked_since = at_time
+            _suppressed_hours = at_time - self._sj_mto_blocked_since
+            # Suppress MTSanBarth unless back-pressure limit reached
+            _sj_mto_override = _suppressed_hours >= MTO_SJ_BACKPRESSURE_HOURS
+        else:
+            # No MTO receiver waiting — reset timer and allow normal MTSanBarth logic
+            self._sj_mto_blocked_since = None
+            _sj_mto_override = False
+
         # Include MTSanBarth only when she can berth no later than the best primary,
         # i.e. when all primaries are delayed and MTSanBarth is free sooner.
         # Also include her when no primary is available at all (last-resort fallback).
@@ -2069,13 +2105,19 @@ class Simulation:
         sj_fender_busy = at_time < self.mtsanbarth_fender_ready_t
         candidates = list(primary_candidates)
         if sj_candidate is not None and not sj_occupied and not sj_fender_busy:
-            sj_start = sj_candidate[0]
-            _pressure_high = (self._daughters_inbound_to_bia()
-                              >= SANJULIAN_DYNAMIC_THRESHOLD_INBOUND)
-            if (earliest_primary_start is None
-                    or sj_start < earliest_primary_start - 1e-6
-                    or _pressure_high):
-                candidates.append(sj_candidate)
+            # When MTO suppression is active and the 3-day limit hasn't been hit,
+            # drop MTSanBarth from candidates entirely so primaries stay clear.
+            if _mto_receiver_waiting and not _sj_mto_override:
+                pass   # MTSanBarth suppressed — not added to candidates
+            else:
+                sj_start = sj_candidate[0]
+                _pressure_high = (self._daughters_inbound_to_bia()
+                                  >= SANJULIAN_DYNAMIC_THRESHOLD_INBOUND)
+                if (earliest_primary_start is None
+                        or sj_start < earliest_primary_start - 1e-6
+                        or _pressure_high
+                        or _sj_mto_override):   # back-pressure relief
+                    candidates.append(sj_candidate)
 
         return berthing_start, candidates
 
