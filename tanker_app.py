@@ -914,7 +914,6 @@ LOCATION_CATALOGUE = [
     {"display": "Bryanston (BIA)",     "sim_value": "Bryanston",
      "field_zone": "BIA",
      "statuses": [
-        ("DISCHARGING",            "⬇️ Discharge — in progress"),
         ("HOSE_CONNECT_B",         "🔧 Hose connection underway"),
         ("BERTHING_B",             "🔗 Berthing in progress"),
         ("WAITING_BERTH_B",        "⏳ Arrived — waiting for berth slot"),
@@ -927,7 +926,6 @@ LOCATION_CATALOGUE = [
     {"display": "GreenEagle (BIA)",     "sim_value": "GreenEagle",
      "field_zone": "BIA",
      "statuses": [
-        ("DISCHARGING",            "⬇️ Discharge — in progress"),
         ("HOSE_CONNECT_B",         "🔧 Hose connection underway"),
         ("BERTHING_B",             "🔗 Berthing in progress"),
         ("WAITING_BERTH_B",        "⏳ Arrived — waiting for berth slot"),
@@ -941,7 +939,6 @@ LOCATION_CATALOGUE = [
     {"display": "MT SanBarth (BIA)",     "sim_value": "MTSanBarth",
      "field_zone": "BIA",
      "statuses": [
-        ("DISCHARGING",            "⬇️ Discharge — in progress"),
         ("HOSE_CONNECT_B",         "🔧 Hose connection underway"),
         ("BERTHING_B",             "🔗 Berthing in progress"),
         ("WAITING_BERTH_B",        "⏳ Arrived — waiting for berth slot"),
@@ -5280,13 +5277,13 @@ def main():
                     _mom    = ""   # mto_target_vessel carries the pairing
                     _stor   = ""
                 elif _vname in _mto_dischargers and ("ongoing" in _comment or "discharge" in _comment):
-                    # Actively discharging to MTO receiver right now
-                    _status = "DISCHARGING"
+                    # Actively discharging to MTO receiver right now — show as hose connection
+                    _status = "HOSE_CONNECT_B"
                     _mom    = _mto_receiver_name
                     _stor   = ""
                 elif _vname in _mto_dischargers:
-                    # In dischargers list but unclear status — default to DISCHARGING
-                    _status = "DISCHARGING"
+                    # In dischargers list but unclear status — show as hose connection
+                    _status = "HOSE_CONNECT_B"
                     _mom    = _mto_receiver_name
                     _stor   = ""
                 elif "loading is still ongoing" in _comment and _stor:
@@ -5294,7 +5291,7 @@ def main():
                 elif "loading" in _comment and "ongoing" in _comment and _stor:
                     _status = "LOADING"
                 elif "discharge" in _comment and "ongoing" in _comment and _mom:
-                    _status = "DISCHARGING"
+                    _status = "HOSE_CONNECT_B"
                 elif ("en route to bonny" in _comment or "underway to bia" in _comment
                       or "from the fairway buoy to drop anchor" in _comment):
                     _status = "SAILING_AB_LEG2"
@@ -5318,7 +5315,7 @@ def main():
                     if not _mom:
                         _mom = "Bryanston"
                 elif _mom and _cargo > 0:
-                    _status = "DISCHARGING"
+                    _status = "HOSE_CONNECT_B"
                 elif _stor and _cargo > 0:
                     _status = "LOADING"
                 elif _stor and _cargo == 0:
@@ -5338,7 +5335,7 @@ def main():
                 # For actively discharging MTO vessels, compute how much was already pumped
                 # prev_prediction (col 5) - current_rob (col 9) = volume already transferred
                 _already_xfr = 0
-                if _status == "DISCHARGING" and _mto_tv:
+                if _status in {"DISCHARGING", "HOSE_CONNECT_B"} and _mto_tv:
                     _prev_pred = abs(_num(rows, _r, 5))
                     _already_xfr = max(0, _prev_pred - _cargo)
 
@@ -5936,7 +5933,7 @@ def main():
                         if _sj_dv:
                             _sj_mom = _sj_dv.get("target_mother", "") or ""
                             _vp_states_pdf["MTSanBarth"] = {
-                                "status":         "DISCHARGING" if _sj_mom else "IDLE_B",
+                                "status":         "HOSE_CONNECT_B" if _sj_mom else "IDLE_B",
                                 "cargo_bbl":      int(_sj_dv.get("cargo_bbl", 0)),
                                 "location":       _sj_mom if _sj_mom else "MTSanBarth",
                                 "target_storage": None,
@@ -5969,7 +5966,7 @@ def main():
                         # Build a compact summary for the persistent green banner
                         _loading_v = [v["name"] for v in _ex.get("daughter_vessels", []) if v.get("status") == "LOADING"]
                         _transit_v = [v["name"] for v in _ex.get("daughter_vessels", []) if v.get("status", "").startswith("SAILING")]
-                        _disch_v   = [v["name"] for v in _ex.get("daughter_vessels", []) if v.get("status") == "DISCHARGING"]
+                        _disch_v   = [v["name"] for v in _ex.get("daughter_vessels", []) if v.get("status") in {"DISCHARGING", "HOSE_CONNECT_B"}]
                         _apply_parts = []
                         if _loading_v:  _apply_parts.append(f"loading: {', '.join(_loading_v)}")
                         if _transit_v:  _apply_parts.append(f"in transit: {', '.join(_transit_v)}")
