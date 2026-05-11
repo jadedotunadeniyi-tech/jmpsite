@@ -8589,7 +8589,51 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
 
             _html.append("</table></div>")
             _table_html = "\n".join(_html)
-            st.markdown(_table_html, unsafe_allow_html=True)
+
+            # ── Dual scrollbar: mirror scrollbar at top so user can scroll
+            #    horizontally without going to the bottom of the table first.
+            _scroll_id   = "jmp_scroll_outer"
+            _mirror_id   = "jmp_scroll_mirror"
+            _dual_scroll_html = f"""
+<div id="{_mirror_id}"
+     style="overflow-x:auto;overflow-y:hidden;height:14px;margin-bottom:2px">
+  <div id="{_mirror_id}_inner" style="height:1px"></div>
+</div>
+<div id="{_scroll_id}" style="overflow-x:auto;padding:4px 0">
+  {_table_html.replace('<div class="jmp-wrap">', '<div class="jmp-wrap" id="jmp_inner_wrap">')}
+</div>
+<script>
+(function(){{
+  var mirror  = document.getElementById("{_mirror_id}");
+  var mInner  = document.getElementById("{_mirror_id}_inner");
+  var outer   = document.getElementById("{_scroll_id}");
+  var wrap    = document.getElementById("jmp_inner_wrap");
+  if (!mirror || !outer || !wrap) return;
+  function syncWidth(){{
+    // Set the phantom inner div to the real table scroll width
+    var tableEl = wrap.querySelector("table");
+    if (tableEl) mInner.style.width = tableEl.scrollWidth + "px";
+  }}
+  syncWidth();
+  var ignoreScroll = false;
+  mirror.addEventListener("scroll", function(){{
+    if (ignoreScroll) return;
+    ignoreScroll = true;
+    outer.scrollLeft = mirror.scrollLeft;
+    ignoreScroll = false;
+  }});
+  outer.addEventListener("scroll", function(){{
+    if (ignoreScroll) return;
+    ignoreScroll = true;
+    mirror.scrollLeft = outer.scrollLeft;
+    ignoreScroll = false;
+  }});
+  // Re-sync width if Streamlit re-renders
+  new MutationObserver(syncWidth).observe(outer, {{childList:true, subtree:true}});
+}})();
+</script>
+"""
+            st.markdown(_dual_scroll_html, unsafe_allow_html=True)
 
             # ── Legend ─────────────────────────────────────────────────────────────────
             _leg_html = '<div style="margin:10px 0 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
@@ -9018,7 +9062,7 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                 st.session_state["_jmp_full_html"] = _full_run_html
                 st.session_state["_jmp_full_key"]  = _jmp_rebuild_key
 
-            _dc1, _dc2, _dc3 = st.columns([2,2,2])
+            _dc1, _dc2, _dc3, _dc4 = st.columns([2, 2, 2, 2])
             with _dc1:
                 # Full-run HTML download — all days, landscape print-ready
                 st.download_button(
@@ -9074,10 +9118,152 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                     mime="text/csv"
                 )
             with _dc3:
+                # ── Validated Daily Stock Report CSV ──────────────────────────
+                # Builds a re-uploadable CSV matching the Daily Stock Report
+                # format so the JMP Day-1 validated snapshot can be used as
+                # the next day's opening position input.
+                try:
+                    _day1_date  = _jmp_start.strftime("%m/%d/%Y") + " 07:00:00"
+
+                    # Storage opening stocks from simulation parameters
+                    _sv_stocks  = {
+                        "Westmore":  params.get("westmore", 0),
+                        "JasmineS":  params.get("jasmines", 0),
+                        "Chapel":    params.get("chapel",   0),
+                        "Duke":      params.get("duke",     0),
+                        "Starturn":  params.get("starturn", 0),
+                        "PGM":       params.get("pgm",      0),
+                        "Ibom":      params.get("ibom",     0),
+                    }
+
+                    # Mother vessel opening ROBs from simulation state
+                    _mv_stocks = {}
+                    for _mvn in ["Bryanston", "GreenEagle", "MTSanBarth"]:
+                        try:
+                            _mv_stocks[_mvn] = int(getattr(S, "mother_bbl", {}).get(_mvn, 0))
+                        except Exception:
+                            _mv_stocks[_mvn] = 0
+
+                    # Daughter vessel Day-1 states from log_df
+                    _ALL_DAUGHTERS = [
+                        "Sherlock","Laphroaig","Watson","Bedford","Balham",
+                        "Amyla","Bagshot","Rahama","Rathbone","SantaMonica","Woodstock",
+                    ]
+                    _dv_rows = []
+                    for _dvn in _ALL_DAUGHTERS:
+                        _d1_log = log_df[
+                            (log_df["Day"] == 1) & (log_df["Vessel"] == _dvn)
+                        ] if not log_df.empty else pd.DataFrame()
+                        _d1_cargo  = 0
+                        _d1_stor   = ""
+                        _d1_mom    = ""
+                        _d1_status = ""
+                        if not _d1_log.empty:
+                            _last = _d1_log.iloc[-1]
+                            _d1_cargo  = int(float(str(_last.get("Cargo_bbl", 0) or 0)))
+                            _d1_stor   = str(_last.get("Storage",  "") or "")
+                            _d1_mom    = str(_last.get("Mother",   "") or "")
+                            _d1_status = str(_last.get("Event",    "") or "")
+                        _dv_rows.append({
+                            "Vessel":         _dvn,
+                            "ROB_bbl":        _d1_cargo,
+                            "Loading_From":   _d1_stor,
+                            "Discharging_To": _d1_mom,
+                            "Status":         _d1_status,
+                        })
+
+                    # Build flat CSV matching _parse_stock_csv column layout
+                    import io as _io_mod
+                    _stock_buf = _io_mod.StringIO()
+                    _sw = csv.writer(_stock_buf)
+
+                    # Row 0: title
+                    _sw.writerow(["Daily Stock Report — JMP Validated Extract"])
+                    # Row 1: date in col 4
+                    _r1 = [""] * 10
+                    _r1[4] = _day1_date
+                    _sw.writerow(_r1)
+                    # Rows 2-6: spacers
+                    for _ in range(5):
+                        _sw.writerow([""])
+
+                    # Rows 7-13: storage vessels
+                    # col 2=name  col 7=volume (Duke/Starturn/PGM)  col 8=volume (Westmore/JasmineS/Chapel)
+                    _SV_ORDER = ["Westmore","JasmineS","Chapel","Duke","Ibom","PGM","Starturn"]
+                    for _svn in _SV_ORDER:
+                        _vol = _sv_stocks.get(_svn, 0)
+                        _row = [""] * 10
+                        _row[2] = _svn
+                        _row[7] = _vol
+                        _row[8] = _vol
+                        _sw.writerow(_row)
+
+                    # Rows 14-17: spacers
+                    for _ in range(4):
+                        _sw.writerow([""])
+
+                    # Rows 18-28: daughter vessels
+                    _stor_col_map = {
+                        "Chapel": 11, "JasmineS": 12, "Westmore": 13,
+                        "Duke": 14, "Ibom": 15,
+                    }
+                    _mom_col_map = {
+                        "GreenEagle": 18, "Bryanston": 19, "MTSanBarth": 20,
+                    }
+                    for _dv in _dv_rows:
+                        _row = [""] * 26
+                        _row[2]  = _dv["Vessel"]
+                        _row[9]  = _dv["ROB_bbl"]
+                        _row[10] = _dv["Status"]
+                        if _dv["Loading_From"] in _stor_col_map:
+                            _row[_stor_col_map[_dv["Loading_From"]]] = _dv["ROB_bbl"]
+                        if _dv["Discharging_To"] in _mom_col_map:
+                            _row[_mom_col_map[_dv["Discharging_To"]]] = _dv["ROB_bbl"]
+                        _sw.writerow(_row)
+
+                    # Row 29: Bryanston
+                    _bry_row = [""] * 26
+                    _bry_row[2] = "Bryanston"
+                    _bry_row[9] = _mv_stocks.get("Bryanston", 0)
+                    _sw.writerow(_bry_row)
+                    # Row 30: MTSanBarth
+                    _sb_row = [""] * 26
+                    _sb_row[2] = "MT San Barth"
+                    _sb_row[9] = _mv_stocks.get("MTSanBarth", 0)
+                    _sw.writerow(_sb_row)
+                    # Row 31: GreenEagle
+                    _ge_row = [""] * 26
+                    _ge_row[2] = "Green Eagle"
+                    _ge_row[9] = _mv_stocks.get("GreenEagle", 0)
+                    _sw.writerow(_ge_row)
+
+                    _validated_stock_csv = _stock_buf.getvalue().encode("utf-8")
+                    _vs_filename = f"daily_stock_report_{_jmp_start.isoformat()}.csv"
+
+                    st.download_button(
+                        "📋 Download Validated Stock CSV",
+                        data=_validated_stock_csv,
+                        file_name=_vs_filename,
+                        mime="text/csv",
+                        help=(
+                            "Re-uploadable Daily Stock Report CSV pre-filled with JMP Day-1 "
+                            "validated opening stocks for all storage tanks, mother vessels, "
+                            "and daughter vessel ROBs. Upload this in the "
+                            "'Load from Daily Stock Report' section to carry the forecast "
+                            "forward as the next day's opening position."
+                        )
+                    )
+                except Exception as _csv_ex:
+                    st.caption(f"Stock CSV unavailable: {_csv_ex}")
+
+            with _dc4:
                 st.caption(
                     "💡 **PDF tip:** Download the HTML file, open in Chrome/Edge → "
                     "Ctrl+P → destination 'Save as PDF' → **Layout: Landscape** → Save. "
-                    "All days are included regardless of which page is shown above."
+                    "All days are included regardless of which page is shown above.\n\n"
+                    "📋 **Stock CSV:** Download the Validated Stock CSV and re-upload it "
+                    "in the **Daily Stock Report** section to carry the JMP forecast "
+                    "forward as tomorrow's opening position."
                 )
 
 
