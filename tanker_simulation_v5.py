@@ -2664,114 +2664,172 @@ class Simulation:
         )
 
     def _mto_run_aggressive_pairs(self, t, day_key, waiters, hard_wait_set, parcel_limit):
-        """Form as many concurrent transient/discharger pairs as possible.
+        """Form the globally optimal set of concurrent transient/discharger pairs.
 
-        During export unavailability every eligible large vessel becomes a
-        receiver filling to its MTO capacity; every small vessel discharges to
-        the nearest available receiver.  Multiple pairs operate simultaneously:
-            Watson  ← Woodstock      (both waiting at BIA)
-            Sherlock ← Bagshot       (both waiting at BIA)
+        During export unavailability every eligible vessel with headroom becomes
+        a receiver; every other vessel with cargo discharges into the best
+        available receiver.  Multiple pairs operate simultaneously:
+            Watson  ← Bagshot        (Watson has most headroom)
+            Amyla   ← Woodstock      (Amyla becomes receiver when Watson is full)
             SantaMonica → any receiver with headroom
 
+        Algorithm — globally optimal bipartite matching:
+          1. Build the set of CANDIDATE RECEIVERS: every non-MTO_NEVER_RECEIVER
+             waiter whose berth is free, who has headroom, and who has not
+             exceeded the parcel limit.  Rank by (already_receiver, MTO_cap) so
+             established receivers are filled first before new ones are opened.
+          2. Build the set of CANDIDATE DISCHARGERS: every waiter with cargo > 0
+             that is not already designated as a receiver this tick.
+          3. Run a greedy optimal matching:
+             - For each discharger (smallest cargo first — fastest return to load):
+               find the receiver that maximises transferred volume (most headroom,
+               berth free, cap >= discharger cargo).
+             - If no receiver can take this discharger at full cargo, try partial.
+             - A vessel can only hold one role per tick (_assigned set).
+          4. Execute all matched pairs.
+
         Rules:
-          - Receivers: any waiter NOT in MTO_NEVER_RECEIVER, ordered by
-            MTO transient capacity descending.
-          - Each receiver can hold only one discharger at a time
-            (serialised by _mto_berth_free_at).
-          - A vessel already acting as receiver for this day (flagged by
-            _mto_transient_since_day) continues to accept top-up parcels
-            until it reaches its MTO capacity.
-          - SantaMonica / Rahama (MTO_NEVER_RECEIVER) can only be dischargers.
-          - Discharger assigned to the receiver with most remaining headroom
-            whose berth is currently free.
+          - MTO_NEVER_RECEIVER vessels (Rahama, SantaMonica) are dischargers only.
+          - Berth serialisation: _mto_berth_free_at prevents double-booking a receiver.
+          - Parcel limit prevents endless top-ups before the receiver offloads.
+          - A vessel already marked as receiver (_mto_transient_since_day set) is
+            preferred as receiver over a fresh vessel of equal cap — fills it first.
         """
         def _mto_cap(vv):
             return MTO_TRANSIENT_CAPACITY_BBL.get(vv.name, vv.cargo_capacity)
 
-        # Separate receivers and potential dischargers from the waiter pool
-        # A vessel can switch roles mid-day: if a previously nominated receiver
-        # has filled to capacity it should not accept new dischargers.
-        _receivers = sorted(
-            [vv for vv in waiters if vv.name not in MTO_NEVER_RECEIVER],
-            key=lambda vv: _mto_cap(vv),
-            reverse=True,   # largest capacity first
-        )
-        _all_pairs_fired = 0
+        # ── Step 1: identify candidate receivers ──────────────────────────────
+        # Sort: already-nominated receivers first (fill before opening new ones),
+        # then by MTO cap descending (largest vessel = best receiver).
+        def _recv_score(vv):
+            already = 1 if getattr(vv, "_mto_transient_since_day", None) is not None else 0
+            return (already, _mto_cap(vv))
 
-        # Track which vessels have been assigned in this tick to avoid
-        # assigning the same vessel to two roles simultaneously.
-        _assigned = set()
-
-        for recv in _receivers:
-            if recv.name in _assigned:
-                continue
-
-            _trn_cap  = _mto_cap(recv)
-            _headroom = max(0.0, _trn_cap - recv.cargo_bbl)
-
-            # Skip receiver if berth is already locked (transfer in progress)
-            _berth_free = getattr(recv, "_mto_berth_free_at", 0.0)
-            if _berth_free > t:
-                _assigned.add(recv.name)  # still a receiver, just busy
-                continue
-
-            # Skip if receiver is already at capacity
-            if _headroom <= 0:
-                _assigned.add(recv.name)
-                continue
-
-            # Enforce parcel limit per receiver per stay (prevents endless top-ups
-            # if a discharger keeps arriving before the receiver offloads)
-            _parcels = getattr(recv, "_mto_parcels_received", 0)
-            if _parcels >= parcel_limit:
-                _assigned.add(recv.name)
-                continue
-
-            # Find best discharger: not assigned, fits in headroom, smaller cap
-            _candidates = [
+        _candidate_receivers = sorted(
+            [
                 vv for vv in waiters
-                if vv is not recv
-                and vv.name not in _assigned
-                and vv.cargo_bbl > 0
-                and vv.cargo_bbl <= _headroom
-                and _mto_cap(vv) <= _trn_cap
-            ]
-            if not _candidates:
-                # Try any vessel that fits (even same cap — fallback for tiny pools)
-                _candidates = [
-                    vv for vv in waiters
-                    if vv is not recv
-                    and vv.name not in _assigned
-                    and vv.cargo_bbl > 0
-                    and vv.cargo_bbl <= _headroom
-                ]
-            if not _candidates:
+                if vv.name not in MTO_NEVER_RECEIVER
+                and max(0.0, _mto_cap(vv) - vv.cargo_bbl) > 0
+                and getattr(vv, "_mto_berth_free_at", 0.0) <= t
+                and getattr(vv, "_mto_parcels_received", 0) < parcel_limit
+            ],
+            key=_recv_score,
+            reverse=True,
+        )
+
+        if not _candidate_receivers:
+            return
+
+        # ── Step 2: identify candidate dischargers ────────────────────────────
+        # Any waiter with cargo that is NOT in the receiver pool AND is NOT an
+        # established receiver (mto_transient_since_day set).  Established receivers
+        # hold consolidated cargo waiting for a mother berth — they must NOT be
+        # re-discharged into another vessel (they would lose all accumulated volume).
+        _recv_names = {vv.name for vv in _candidate_receivers}
+        _established_recv_names = {
+            vv.name for vv in waiters
+            if getattr(vv, "_mto_transient_since_day", None) is not None
+        }
+        _candidate_dischargers = sorted(
+            [
+                vv for vv in waiters
+                if vv.cargo_bbl > 0
+                and vv.name not in _recv_names
+                and vv.name not in _established_recv_names
+            ],
+            # Smallest cargo first: fastest to discharge and return to load port
+            key=lambda vv: vv.cargo_bbl,
+        )
+
+        # ── Step 3: optimal greedy matching ───────────────────────────────────
+        # For each discharger find the best available receiver.
+        # "Best" = most headroom (maximises volume moved per berth slot),
+        # ties broken by largest MTO cap (keep large vessels as receivers).
+        _assigned_receivers  = set()   # receiver names claimed this tick
+        _assigned_dischargers = set()  # discharger names claimed this tick
+        _pairs = []                    # list of (recv, discharger, transfer_bbl)
+
+        # Build a mutable headroom map so sequential assignments see updated state
+        _headroom_now = {
+            vv.name: max(0.0, _mto_cap(vv) - vv.cargo_bbl)
+            for vv in _candidate_receivers
+        }
+
+        for dis in _candidate_dischargers:
+            if dis.name in _assigned_dischargers:
                 continue
 
-            # Prefer hard-waiters; among those pick smallest cargo for fastest return
-            _hard = [vv for vv in _candidates if vv.status in hard_wait_set]
-            _pool = _hard if _hard else _candidates
-            discharger_v = min(_pool, key=lambda vv: vv.cargo_bbl)
+            # Find the best receiver for this discharger
+            best_recv = None
+            best_score = -1.0
 
-            transfer_bbl = min(discharger_v.cargo_bbl, _headroom)
-            if transfer_bbl <= 0:
+            for recv in _candidate_receivers:
+                if recv.name in _assigned_receivers:
+                    continue
+                headroom = _headroom_now[recv.name]
+                if headroom <= 0:
+                    continue
+                # Receiver cap must be >= discharger cap (bigger holds smaller rule)
+                if _mto_cap(recv) < _mto_cap(dis):
+                    continue
+                # How much can we actually transfer?
+                xfer = min(dis.cargo_bbl, headroom)
+                if xfer <= 0:
+                    continue
+                # Score: full-load preferred; then most headroom; then largest cap
+                full_bonus = 1_000_000 if xfer == dis.cargo_bbl else 0
+                hard_bonus = 500_000 if dis.status in hard_wait_set else 0
+                score = full_bonus + hard_bonus + headroom + _mto_cap(recv)
+                if score > best_score:
+                    best_score = score
+                    best_recv  = recv
+
+            if best_recv is None:
+                # Relax the cap constraint — allow same-cap or smaller receiver
+                # as last resort (e.g. Amyla receiving Bagshot of equal MTO cap)
+                for recv in _candidate_receivers:
+                    if recv.name in _assigned_receivers:
+                        continue
+                    headroom = _headroom_now[recv.name]
+                    if headroom <= 0:
+                        continue
+                    xfer = min(dis.cargo_bbl, headroom)
+                    if xfer <= 0:
+                        continue
+                    full_bonus = 1_000_000 if xfer == dis.cargo_bbl else 0
+                    hard_bonus = 500_000 if dis.status in hard_wait_set else 0
+                    score = full_bonus + hard_bonus + headroom + _mto_cap(recv)
+                    if score > best_score:
+                        best_score = score
+                        best_recv  = recv
+
+            if best_recv is None:
                 continue
 
+            xfer_bbl = min(dis.cargo_bbl, _headroom_now[best_recv.name])
+            if xfer_bbl <= 0:
+                continue
+
+            _pairs.append((best_recv, dis, xfer_bbl))
+            _assigned_receivers.add(best_recv.name)
+            _assigned_dischargers.add(dis.name)
+            # Reduce headroom so subsequent dischargers see the updated state
+            _headroom_now[best_recv.name] -= xfer_bbl
+
+        # ── Step 4: execute all matched pairs ─────────────────────────────────
+        _pairs_fired = 0
+        for recv, dis, xfer_bbl in _pairs:
             # Initialise receiver tracking on first nomination this stay
             if getattr(recv, "_mto_transient_since_day", None) is None:
                 recv._mto_transient_since_day = day_key
                 recv._mto_parcels_received    = 0
 
-            self._mto_execute_pair(
-                t, day_key, recv, discharger_v, transfer_bbl, escalated=True
-            )
-            _assigned.add(recv.name)
-            _assigned.add(discharger_v.name)
-            _all_pairs_fired += 1
+            self._mto_execute_pair(t, day_key, recv, dis, xfer_bbl, escalated=True)
+            _pairs_fired += 1
 
-        if _all_pairs_fired:
+        if _pairs_fired:
             self._mto_days_fired[day_key] = (
-                self._mto_days_fired.get(day_key, 0) + _all_pairs_fired
+                self._mto_days_fired.get(day_key, 0) + _pairs_fired
             )
 
     def _mto_execute_pair(self, t, day_key, transient_v, discharger_v,
