@@ -48,7 +48,7 @@ import unittest.mock as _mock
 from datetime import datetime
 
 import streamlit as st
-import streamlit.components.v1 as _st_components
+import streamlit.components.v1 as _stc
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -1304,6 +1304,7 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
             point_b_startup_seed_json: str = None,
             mother_export_seed_json: str = None,
             mother_export_force_json: str = None,
+            export_unavailability_json: str = None,
             custom_vessels_json: str = None,
             vessel_resumption_json: str = None,
             mother_unavailability_json: str = None,
@@ -2492,6 +2493,42 @@ def run_sim(sim_days, chapel, jasmines, westmore, duke, starturn, pgm,
                     sim.mother_available_at[_mn] = max(
                         sim.mother_available_at.get(_mn, 0.0), _eh
                     )
+
+    # ── Export unavailability windows ──────────────────────────────────────────
+    # Each window is {label, start_date, end_date}.  During a window, mothers
+    # that have reached their export trigger are held at BIA (export_ready is
+    # set but departure is suppressed).  Mothers already mid-cycle complete
+    # their current export normally.  Converts dates to sim-hours and stores
+    # in sim.export_unavailability_windows as a list of (start_h, end_h) tuples.
+    _export_unavail_windows: list = []
+    if export_unavailability_json:
+        try:
+            _raw_eu = json.loads(export_unavailability_json)
+        except Exception:
+            _raw_eu = []
+        if isinstance(_raw_eu, list):
+            _epoch_dt_eu = mod._SIM_EPOCH
+            for _eu_item in _raw_eu:
+                if not isinstance(_eu_item, dict):
+                    continue
+                _eu_sd = _eu_item.get("start_date", "")
+                _eu_ed = _eu_item.get("end_date", "")
+                if not _eu_sd or not _eu_ed:
+                    continue
+                try:
+                    _eu_sdt = _dt.datetime.fromisoformat(_eu_sd)
+                    _eu_edt = _dt.datetime.fromisoformat(_eu_ed)
+                except ValueError:
+                    try:
+                        _eu_sdt = _dt.datetime.combine(_dt.date.fromisoformat(_eu_sd), _dt.time.min)
+                        _eu_edt = _dt.datetime.combine(_dt.date.fromisoformat(_eu_ed), _dt.time.min)
+                    except Exception:
+                        continue
+                _eu_sh = (_eu_sdt - _epoch_dt_eu).total_seconds() / 3600.0
+                _eu_eh = (_eu_edt - _epoch_dt_eu).total_seconds() / 3600.0
+                if _eu_eh > _eu_sh:
+                    _export_unavail_windows.append((_eu_sh, _eu_eh))
+    sim.export_unavailability_windows = _export_unavail_windows
 
     # ── Universal LOADING partial-cargo resume pass ────────────────────────
     # For every vessel seeded in LOADING status, treat cargo_bbl as the
@@ -6786,6 +6823,11 @@ def main():
         if st.session_state.get("forced_export_departures")
         else None
     )
+    _export_unavailability_json = (
+        json.dumps(st.session_state.get("export_unavailability_windows", []))
+        if st.session_state.get("export_unavailability_windows")
+        else None
+    )
 
     log_df, tl_df, S = run_sim(
         sim_days            = params["sim_days"],
@@ -6821,6 +6863,7 @@ def main():
         point_b_startup_seed_json            = _point_b_seed_json,
         mother_export_seed_json              = _mother_export_seed_json,
         mother_export_force_json             = _mother_export_force_json,
+        export_unavailability_json           = _export_unavailability_json,
         custom_vessels_json                  = _custom_vessels_json,
         vessel_resumption_json               = _vessel_resumption_json,
         mother_unavailability_json           = _mother_unavailability_json,
@@ -8052,6 +8095,169 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                         "third-party discharge at Point B."
                     )
 
+            # ── Force Export Departure ────────────────────────────────────────────────
+            sec("🚢 Force Export Departure")
+            st.caption(
+                "Schedule a primary mother vessel to sail for export discharge on a specific date, "
+                "regardless of her current stock level. She will complete the full export cycle "
+                "(documentation → sail → discharge → return empty). "
+                "Once DOC starts, the berth is locked — no new daughter can berth until she returns."
+            )
+
+            if "forced_export_departures" not in st.session_state:
+                st.session_state["forced_export_departures"] = []
+            _forced_deps = st.session_state["forced_export_departures"]
+
+            _fexp_primary_mothers = [
+                m for m in list(getattr(mod, "MOTHER_NAMES",
+                                        ["Bryanston", "GreenEagle", "MTSanBarth"]))
+                if m != getattr(mod, "MOTHER_QUATERNARY_NAME", "MTSanBarth")
+            ]
+
+            _fexp_c1, _fexp_c2, _fexp_c3 = st.columns([3, 3, 1])
+            with _fexp_c1:
+                _fexp_mother = st.selectbox(
+                    "Mother vessel", _fexp_primary_mothers,
+                    key="fexp_mother_sel", label_visibility="collapsed",
+                    help="Primary mother to force-depart. MT SanBarth is excluded (transload-only).",
+                )
+            with _fexp_c2:
+                _fexp_date = st.date_input(
+                    "Departure date", value=sim_start_date,
+                    key="fexp_date_sel", label_visibility="collapsed",
+                    format="DD/MM/YYYY",
+                    help="Calendar date on which this mother will begin export documentation. "
+                         "She sails during the first available export sail window that day. "
+                         "The berth is locked from DOC start until she returns.",
+                )
+            with _fexp_c3:
+                if st.button("➕ Add", key="fexp_add_btn", use_container_width=True):
+                    _fexp_entry = {"mother": _fexp_mother, "date": _fexp_date.isoformat()}
+                    if _fexp_entry not in _forced_deps:
+                        _forced_deps.append(_fexp_entry)
+                        st.session_state["forced_export_departures"] = _forced_deps
+                    st.rerun()
+
+            if _forced_deps:
+                for _fi, _fe in enumerate(_forced_deps):
+                    _fec1, _fec2, _fec3 = st.columns([3, 3, 1])
+                    _fmc = MOTHER_COLORS.get(_fe["mother"], "#3b82f6")
+                    with _fec1:
+                        st.markdown(
+                            f'<span style="background:{_fmc};color:#fff;border-radius:4px;'
+                            f'padding:2px 10px;font-size:11px;font-weight:700">{_fe["mother"]}</span>',
+                            unsafe_allow_html=True,
+                        )
+                    with _fec2:
+                        try:
+                            _fdate_disp = _dt.date.fromisoformat(_fe["date"]).strftime("%-d %b %Y")
+                        except Exception:
+                            _fdate_disp = _fe["date"]
+                        st.markdown(
+                            f'<span style="font-size:11px;color:#1e40af">'
+                            f'🚢 Force sail {_fdate_disp} · berth locked until return</span>',
+                            unsafe_allow_html=True,
+                        )
+                    with _fec3:
+                        if st.button("✕", key=f"fexp_rm_{_fi}", use_container_width=True):
+                            _forced_deps.pop(_fi)
+                            st.session_state["forced_export_departures"] = _forced_deps
+                            st.rerun()
+                if st.button("🗑️ Clear all forced departures", key="fexp_clear_all"):
+                    st.session_state["forced_export_departures"] = []
+                    st.rerun()
+            else:
+                st.caption("No forced departures scheduled.")
+
+            # ── Export Unavailability Windows ─────────────────────────────────────────
+            sec("🚫 Export Unavailability")
+            st.caption(
+                "Block export sailings for a date range. Mother vessels will continue to receive "
+                "cargo as operationally possible but will be held at BIA until the unavailability "
+                "window ends. Vessels that are already mid-export cycle (DOC/SAILING/IN_PORT) when "
+                "the window begins will complete that cycle normally."
+            )
+
+            if "export_unavailability_windows" not in st.session_state:
+                st.session_state["export_unavailability_windows"] = []
+            _exp_unavail_list = st.session_state["export_unavailability_windows"]
+
+            _eu_c1, _eu_c2, _eu_c3, _eu_c4 = st.columns([3, 3, 3, 1])
+            with _eu_c1:
+                st.caption("Reason / label")
+                _eu_label = st.text_input(
+                    "Label", value="Export unavailable",
+                    key="eu_label_inp", label_visibility="collapsed",
+                    placeholder="e.g. Terminal maintenance",
+                )
+            with _eu_c2:
+                st.caption("Unavailable from")
+                _eu_start = st.date_input(
+                    "Unavailable from", value=sim_start_date,
+                    key="eu_start_sel", label_visibility="collapsed",
+                    format="DD/MM/YYYY",
+                )
+            with _eu_c3:
+                st.caption("Available again from")
+                _eu_end = st.date_input(
+                    "Available again from",
+                    value=sim_start_date + _dt.timedelta(days=7),
+                    key="eu_end_sel", label_visibility="collapsed",
+                    format="DD/MM/YYYY",
+                )
+            with _eu_c4:
+                st.caption("")
+                if st.button("➕ Add", key="eu_add_btn", use_container_width=True):
+                    _eu_err = None
+                    if _eu_end <= _eu_start:
+                        _eu_err = "End date must be after start date."
+                    if _eu_err:
+                        st.error(_eu_err, icon="❌")
+                    else:
+                        _exp_unavail_list.append({
+                            "label":      _eu_label or "Export unavailable",
+                            "start_date": _eu_start.isoformat(),
+                            "end_date":   _eu_end.isoformat(),
+                        })
+                        st.session_state["export_unavailability_windows"] = _exp_unavail_list
+                        st.rerun()
+
+            if _exp_unavail_list:
+                _euh_c1, _euh_c2, _euh_c3, _euh_c4 = st.columns([3, 3, 3, 1])
+                with _euh_c1: st.caption("Reason")
+                with _euh_c2: st.caption("Unavailable from")
+                with _euh_c3: st.caption("Available again from")
+                with _euh_c4: st.caption("")
+
+                for _eui, _eur in enumerate(_exp_unavail_list):
+                    _eu_r1, _eu_r2, _eu_r3, _eu_r4 = st.columns([3, 3, 3, 1])
+                    _esd_fmt = _dt.date.fromisoformat(_eur["start_date"]).strftime("%d %b %Y")
+                    _eed_fmt = _dt.date.fromisoformat(_eur["end_date"]).strftime("%d %b %Y")
+                    _edur = (_dt.date.fromisoformat(_eur["end_date"]) -
+                             _dt.date.fromisoformat(_eur["start_date"])).days
+                    with _eu_r1:
+                        st.markdown(
+                            f'<span style="display:inline-block;background:#dc2626;color:#fff;'
+                            f'font-weight:700;font-size:12px;padding:2px 10px;border-radius:4px">'
+                            f'🚫 {_eur["label"]}</span>',
+                            unsafe_allow_html=True,
+                        )
+                    with _eu_r2:
+                        st.markdown(f"**{_esd_fmt}**")
+                    with _eu_r3:
+                        st.markdown(f"**{_eed_fmt}** · {_edur}d window")
+                    with _eu_r4:
+                        if st.button("✕", key=f"eu_rm_{_eui}", use_container_width=True):
+                            _exp_unavail_list.pop(_eui)
+                            st.session_state["export_unavailability_windows"] = _exp_unavail_list
+                            st.rerun()
+
+                if st.button("🗑️ Clear all export unavailability windows", key="eu_clear_all"):
+                    st.session_state["export_unavailability_windows"] = []
+                    st.rerun()
+            else:
+                st.caption("No export unavailability windows configured.")
+
             # ── Helper: derive plan start date ────────────────────────────────────────
             try:
                 _jmp_start = _dt.date.fromisoformat(_start_iso_str)
@@ -8591,9 +8797,11 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             _html.append("</table></div>")
             _table_html = "\n".join(_html)
 
-            # ── Render JMP table inside components.v1.html (iframe) so that
-            #    the JavaScript top-scrollbar works. st.markdown strips <script>.
-            _jmp_inline_css = """
+            # ── Render in an iframe (components.v1.html) so JavaScript runs.
+            # st.markdown strips <script> tags — this is the only way to get
+            # a working top scrollbar that stays in sync with the bottom one.
+            _iframe_css = """
+              html,body{margin:0;padding:0;background:#fff;overflow-x:hidden}
               .jmp-wrap{overflow-x:auto;padding:4px 0}
               .jmp-table{border-collapse:collapse;min-width:100%;font-size:11px;
                          font-family:'Segoe UI',system-ui,sans-serif}
@@ -8615,73 +8823,42 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
               .jmp-bia-entry{display:inline-block;border-radius:4px;padding:2px 6px;
                              margin:1px 0;font-size:10px;font-weight:600;
                              white-space:nowrap;line-height:1.5}
-              /* Top scrollbar strip */
-              #top-scroll-bar{overflow-x:auto;overflow-y:hidden;
-                              height:16px;margin-bottom:3px;cursor:pointer}
-              #top-scroll-bar-inner{height:1px;background:transparent}
+              /* Top mirror scrollbar */
+              #top-bar{overflow-x:auto;overflow-y:hidden;height:16px;
+                       margin-bottom:2px;border-bottom:1px solid #e2e8f0}
+              #top-bar-inner{height:1px}
+              /* Bottom wrapper */
+              #bot-wrap{overflow-x:auto;padding:4px 0}
             """
-            _jmp_iframe_html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  html,body{{margin:0;padding:0;background:#fff;overflow:hidden}}
-  {_jmp_inline_css}
-</style>
-</head>
-<body>
-<!-- TOP SCROLLBAR (mirrors the table scroll) -->
-<div id="top-scroll-bar">
-  <div id="top-scroll-bar-inner"></div>
-</div>
-<!-- TABLE WRAPPER -->
-<div id="jmp-outer" style="overflow-x:auto;padding:4px 0">
-  {_table_html}
-</div>
+
+            _iframe_doc = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>{_iframe_css}</style>
+</head><body>
+<div id="top-bar"><div id="top-bar-inner"></div></div>
+<div id="bot-wrap">{_table_html}</div>
 <script>
 (function(){{
-  var top   = document.getElementById('top-scroll-bar');
-  var tInner= document.getElementById('top-scroll-bar-inner');
-  var outer = document.getElementById('jmp-outer');
-  if(!top||!outer) return;
-
-  function setInnerWidth(){{
-    var tbl = outer.querySelector('table');
+  var top    = document.getElementById('top-bar');
+  var tInner = document.getElementById('top-bar-inner');
+  var bot    = document.getElementById('bot-wrap');
+  function sync(){{
+    var tbl = bot.querySelector('table');
     if(tbl) tInner.style.width = tbl.scrollWidth + 'px';
   }}
-  setInnerWidth();
-
-  // Auto-resize the iframe height to table content
-  function resizeIframe(){{
-    var tbl = outer.querySelector('table');
-    if(tbl){{
-      var h = tbl.scrollHeight + top.offsetHeight + 32;
-      window.parent.postMessage({{type:'jmp-resize',height:h}},'*');
-    }}
-  }}
-  resizeIframe();
-
-  var busy = false;
-  top.addEventListener('scroll', function(){{
-    if(busy) return; busy=true;
-    outer.scrollLeft = top.scrollLeft;
-    busy=false;
-  }});
-  outer.addEventListener('scroll', function(){{
-    if(busy) return; busy=true;
-    top.scrollLeft = outer.scrollLeft;
-    busy=false;
-  }});
-  new MutationObserver(function(){{ setInnerWidth(); resizeIframe(); }})
-    .observe(outer,{{childList:true,subtree:true}});
+  sync();
+  var lock = false;
+  top.addEventListener('scroll',function(){{if(lock)return;lock=true;bot.scrollLeft=top.scrollLeft;lock=false;}});
+  bot.addEventListener('scroll',function(){{if(lock)return;lock=true;top.scrollLeft=bot.scrollLeft;lock=false;}});
+  new MutationObserver(sync).observe(bot,{{childList:true,subtree:true}});
 }})();
 </script>
-</body>
-</html>"""
+</body></html>"""
 
-            # Estimate iframe height: ~22px per row + 120px headers + 20px top bar
-            _iframe_h = min(max(len(_ev) * 24 + 160, 300), 3200)
-            _st_components.html(_jmp_iframe_html, height=_iframe_h, scrolling=False)
+            # Height: ~24 px per data row + 80 px for two header rows + 20 px top bar
+            _n_data_rows = _jmp_d1 - _jmp_d0 + 1
+            _iframe_height = min(_n_data_rows * 24 + 120, 3000)
+            _stc.html(_iframe_doc, height=_iframe_height, scrolling=False)
 
             # ── Legend ─────────────────────────────────────────────────────────────────
             _leg_html = '<div style="margin:10px 0 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
@@ -9110,7 +9287,7 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                 st.session_state["_jmp_full_html"] = _full_run_html
                 st.session_state["_jmp_full_key"]  = _jmp_rebuild_key
 
-            _dc1, _dc2, _dc3, _dc4 = st.columns([2, 2, 2, 2])
+            _dc1, _dc2, _dc3 = st.columns([2,2,2])
             with _dc1:
                 # Full-run HTML download — all days, landscape print-ready
                 st.download_button(
@@ -9166,112 +9343,10 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                     mime="text/csv"
                 )
             with _dc3:
-                # ── Validated Daily Stock Report CSV ──────────────────────────
-                # Builds a re-uploadable CSV in Daily Stock Report column layout.
-                # Covers all storage tanks, mother vessel ROBs, and daughter
-                # vessel cargo/status from the Day-1 simulation snapshot.
-                try:
-                    _day1_date_str = _jmp_start.strftime("%m/%d/%Y") + " 07:00:00"
-
-                    # Storage opening stocks from sim params
-                    _sv_map = {
-                        "Westmore": params.get("westmore", 0),
-                        "JasmineS": params.get("jasmines", 0),
-                        "Chapel":   params.get("chapel",   0),
-                        "Duke":     params.get("duke",     0),
-                        "Starturn": params.get("starturn", 0),
-                        "PGM":      params.get("pgm",      0),
-                        "Ibom":     params.get("ibom",     0),
-                    }
-
-                    # Mother vessel ROBs — read from simulation state S
-                    _mv_map = {}
-                    for _mvn in ["Bryanston", "GreenEagle", "MTSanBarth"]:
-                        try:
-                            _mv_map[_mvn] = int(getattr(S, "mother_bbl", {}).get(_mvn, 0))
-                        except Exception:
-                            _mv_map[_mvn] = 0
-
-                    # Daughter vessels — Day-1 snapshot from log_df
-                    _ALL_DVS = [
-                        "Sherlock","Laphroaig","Watson","Bedford","Balham",
-                        "Amyla","Bagshot","Rahama","Rathbone","SantaMonica","Woodstock",
-                    ]
-                    _stor_col = {"Chapel":11,"JasmineS":12,"Westmore":13,"Duke":14,"Ibom":15}
-                    _mom_col  = {"GreenEagle":18,"Bryanston":19,"MTSanBarth":20}
-
-                    _vs_buf = io.StringIO()
-                    _vsw = csv.writer(_vs_buf)
-
-                    # Row 0: title
-                    _vsw.writerow(["Daily Stock Report — JMP Validated Extract"])
-                    # Row 1: date in col 4 (matches _parse_stock_csv expectation)
-                    _r1 = [""] * 10; _r1[4] = _day1_date_str
-                    _vsw.writerow(_r1)
-                    # Rows 2-6: spacers
-                    for _ in range(5): _vsw.writerow([""])
-
-                    # Rows 7-13: storage vessels (col 2=name, col 7 & 8 = volume)
-                    for _svn in ["Westmore","JasmineS","Chapel","Duke","Ibom","PGM","Starturn"]:
-                        _vol = _sv_map.get(_svn, 0)
-                        _sr = [""] * 10
-                        _sr[2] = _svn; _sr[7] = _vol; _sr[8] = _vol
-                        _vsw.writerow(_sr)
-
-                    # Rows 14-17: spacers
-                    for _ in range(4): _vsw.writerow([""])
-
-                    # Rows 18-28: daughter vessels
-                    for _dvn in _ALL_DVS:
-                        _d1 = log_df[
-                            (log_df["Day"] == 1) & (log_df["Vessel"] == _dvn)
-                        ] if not log_df.empty else pd.DataFrame()
-                        _cargo = 0; _stor = ""; _mom = ""; _evt = ""
-                        if not _d1.empty:
-                            _lr   = _d1.iloc[-1]
-                            _cargo = int(float(str(_lr.get("Cargo_bbl", 0) or 0)))
-                            _stor  = str(_lr.get("Storage", "") or "")
-                            _mom   = str(_lr.get("Mother",  "") or "")
-                            _evt   = str(_lr.get("Event",   "") or "")
-                        _dr = [""] * 26
-                        _dr[2] = _dvn; _dr[9] = _cargo; _dr[10] = _evt
-                        if _stor in _stor_col: _dr[_stor_col[_stor]] = _cargo
-                        if _mom  in _mom_col:  _dr[_mom_col[_mom]]   = _cargo
-                        _vsw.writerow(_dr)
-
-                    # Rows 29-31: mother vessels
-                    for _mvn, _label in [
-                        ("Bryanston",  "Bryanston"),
-                        ("MTSanBarth", "MT San Barth"),
-                        ("GreenEagle", "Green Eagle"),
-                    ]:
-                        _mr = [""] * 26
-                        _mr[2] = _label; _mr[9] = _mv_map.get(_mvn, 0)
-                        _vsw.writerow(_mr)
-
-                    _vs_csv_bytes = _vs_buf.getvalue().encode("utf-8")
-                    st.download_button(
-                        "📋 Validated Daily Stock CSV",
-                        data=_vs_csv_bytes,
-                        file_name=f"daily_stock_report_{_jmp_start.isoformat()}.csv",
-                        mime="text/csv",
-                        help=(
-                            "Re-uploadable Daily Stock Report CSV with JMP Day-1 validated "
-                            "opening stocks for all tanks, mothers, and daughter vessel ROBs. "
-                            "Upload this in the 'Load from Daily Stock Report' section to use "
-                            "the JMP forecast as tomorrow's opening position."
-                        )
-                    )
-                except Exception as _vs_err:
-                    st.warning(f"Stock CSV error: {_vs_err}", icon="⚠️")
-
-            with _dc4:
                 st.caption(
-                    "💡 **PDF tip:** Download the HTML, open in Chrome/Edge → "
-                    "Ctrl+P → 'Save as PDF' → **Landscape** → Save.\n\n"
-                    "📋 **Stock CSV:** Re-upload the Validated Daily Stock CSV in the "
-                    "**Daily Stock Report** section to carry the JMP forward as "
-                    "tomorrow's opening position."
+                    "💡 **PDF tip:** Download the HTML file, open in Chrome/Edge → "
+                    "Ctrl+P → destination 'Save as PDF' → **Layout: Landscape** → Save. "
+                    "All days are included regardless of which page is shown above."
                 )
 
 
@@ -10377,90 +10452,6 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
     st.dataframe(_filt_show, width='stretch', height=440)
     st.caption(f"Showing {len(filt):,} of {len(log_df):,} events")
 
-
-    # ==========================================================================
-    # ── SECTION 12b: JOURNEY MANAGEMENT PLAN ──────────────────────────────────
-    # ==========================================================================
-
-    # ── Force Export Departure ─────────────────────────────────────────────────
-    # Placed immediately before the JMP so operators can schedule forced
-    # departures and instantly see their downstream effect in the plan table.
-    sec("🚢 Force Export Departure")
-    st.caption(
-        "Schedule a primary mother vessel to sail for export discharge on a specific date, "
-        "regardless of her current stock level. She will complete the full export cycle "
-        "(documentation → sail → discharge → return empty). "
-        "Once DOC starts, the berth is locked — no new daughter can berth until she returns."
-    )
-
-    # Initialise session state
-    if "forced_export_departures" not in st.session_state:
-        st.session_state["forced_export_departures"] = []
-    _forced_deps = st.session_state["forced_export_departures"]
-
-    # Build list of primary mothers (exclude MTSanBarth)
-    _fexp_primary_mothers = [
-        m for m in list(getattr(mod, "MOTHER_NAMES",
-                                ["Bryanston", "GreenEagle", "MTSanBarth"]))
-        if m != getattr(mod, "MOTHER_QUATERNARY_NAME", "MTSanBarth")
-    ]
-
-    # ── Add row ───────────────────────────────────────────────────────────────
-    _fexp_c1, _fexp_c2, _fexp_c3 = st.columns([3, 3, 1])
-    with _fexp_c1:
-        _fexp_mother = st.selectbox(
-            "Mother vessel", _fexp_primary_mothers,
-            key="fexp_mother_sel", label_visibility="collapsed",
-            help="Primary mother to force-depart. MT SanBarth is excluded (transload-only).",
-        )
-    with _fexp_c2:
-        _fexp_date = st.date_input(
-            "Departure date", value=sim_start_date,
-            key="fexp_date_sel", label_visibility="collapsed",
-            format="DD/MM/YYYY",
-            help="Calendar date on which this mother will begin export documentation. "
-                 "She sails during the first available export sail window that day. "
-                 "The berth is locked from DOC start until she returns.",
-        )
-    with _fexp_c3:
-        if st.button("➕ Add", key="fexp_add_btn", use_container_width=True):
-            _fexp_entry = {"mother": _fexp_mother, "date": _fexp_date.isoformat()}
-            if _fexp_entry not in _forced_deps:
-                _forced_deps.append(_fexp_entry)
-                st.session_state["forced_export_departures"] = _forced_deps
-            st.rerun()
-
-    # ── Active entries ────────────────────────────────────────────────────────
-    if _forced_deps:
-        for _fi, _fe in enumerate(_forced_deps):
-            _fec1, _fec2, _fec3 = st.columns([3, 3, 1])
-            _fmc = MOTHER_COLORS.get(_fe["mother"], "#3b82f6")
-            with _fec1:
-                st.markdown(
-                    f'<span style="background:{_fmc};color:#fff;border-radius:4px;'
-                    f'padding:2px 10px;font-size:11px;font-weight:700">{_fe["mother"]}</span>',
-                    unsafe_allow_html=True,
-                )
-            with _fec2:
-                try:
-                    _fdate_disp = _dt.date.fromisoformat(_fe["date"]).strftime("%-d %b %Y")
-                except Exception:
-                    _fdate_disp = _fe["date"]
-                st.markdown(
-                    f'<span style="font-size:11px;color:#1e40af">'
-                    f'🚢 Force sail {_fdate_disp} · berth locked until return</span>',
-                    unsafe_allow_html=True,
-                )
-            with _fec3:
-                if st.button("✕", key=f"fexp_rm_{_fi}", use_container_width=True):
-                    _forced_deps.pop(_fi)
-                    st.session_state["forced_export_departures"] = _forced_deps
-                    st.rerun()
-        if st.button("🗑️ Clear all forced departures", key="fexp_clear_all"):
-            st.session_state["forced_export_departures"] = []
-            st.rerun()
-    else:
-        st.caption("No forced departures scheduled.")
 
     sec("⬇️ Download Results")
     d1,d2,d3 = st.columns(3)
