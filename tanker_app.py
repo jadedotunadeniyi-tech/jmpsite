@@ -5443,6 +5443,94 @@ def main():
                 "Scroll down to **Enter 08:00 vessel positions** to verify.",
                 icon="✅",
             )
+            # ── Download corrected/confirmed stock CSV ────────────────────────
+            # Build a re-uploadable CSV from the confirmed session state so the
+            # operator can export corrected volumes + vessel positions for reuse.
+            try:
+                _ex_conf = st.session_state.get("_pdf_extracted", {})
+                _sv_conf = _ex_conf.get("storage_volumes", {})
+                _mv_conf = _ex_conf.get("mother_volumes", {})
+                _dv_conf = _ex_conf.get("daughter_vessels", [])
+                _rd_conf = _ex_conf.get("report_date", _dt.date.today().isoformat())
+
+                # Override storage & mother volumes from widget state (post-edit)
+                for _svn in ["Chapel","JasmineS","Westmore","Duke","Starturn","PGM"]:
+                    _wv = st.session_state.get(f"sv_{_svn}")
+                    if _wv is not None:
+                        _sv_conf[_svn] = int(_wv)
+                for _mvn, _mvk in [("Bryanston","mv_Bryanston"),("GreenEagle","mv_GreenEagle"),("MTSanBarth","mv_MTSanBarth")]:
+                    _wv = st.session_state.get(_mvk)
+                    if _wv is not None:
+                        _mv_conf[_mvn] = int(_wv)
+
+                try:
+                    _conf_date_dt = _dt.datetime.strptime(_rd_conf, "%Y-%m-%d")
+                    _conf_date_str = _conf_date_dt.strftime("%m/%d/%Y") + " 07:00:00"
+                except Exception:
+                    _conf_date_str = _rd_conf + " 07:00:00"
+
+                _cbuf = io.StringIO()
+                _cw   = csv.writer(_cbuf)
+
+                # Row 0: title
+                _cw.writerow(["Daily Stock Report — Corrected & Confirmed Export"])
+                # Row 1: date in col 4
+                _cr1 = [""] * 10; _cr1[4] = _conf_date_str
+                _cw.writerow(_cr1)
+                for _ in range(5): _cw.writerow([""])  # rows 2-6 spacers
+
+                # Rows 7-13: storage vessels (col 2=name, col 7&8=volume)
+                for _svn in ["Westmore","JasmineS","Chapel","Duke","Ibom","PGM","Starturn"]:
+                    _vol = _sv_conf.get(_svn, 0)
+                    _sr  = [""] * 10
+                    _sr[2] = _svn; _sr[7] = _vol; _sr[8] = _vol
+                    _cw.writerow(_sr)
+
+                for _ in range(4): _cw.writerow([""])  # rows 14-17
+
+                # Rows 18-28: daughter vessels
+                _stor_col = {"Chapel":11,"JasmineS":12,"Westmore":13,"Duke":14,"Ibom":15}
+                _mom_col  = {"GreenEagle":18,"Bryanston":19,"MTSanBarth":20}
+                _ALL_DVS  = ["Sherlock","Laphroaig","Watson","Bedford","Balham",
+                             "Amyla","Bagshot","Rahama","Rathbone","SantaMonica","Woodstock"]
+                # Build lookup from extracted daughter list
+                _dv_lookup = {d["name"]: d for d in _dv_conf}
+                for _dvn in _ALL_DVS:
+                    _dv = _dv_lookup.get(_dvn, {})
+                    _cargo = int(_dv.get("cargo_bbl", 0) or 0)
+                    _stor  = _dv.get("assigned_storage", "") or ""
+                    _mom   = _dv.get("target_mother", "") or ""
+                    _evt   = _dv.get("status", "") or ""
+                    _dr    = [""] * 26
+                    _dr[2] = _dvn; _dr[9] = _cargo; _dr[10] = _evt
+                    if _stor in _stor_col: _dr[_stor_col[_stor]] = _cargo
+                    if _mom  in _mom_col:  _dr[_mom_col[_mom]]   = _cargo
+                    _cw.writerow(_dr)
+
+                # Rows 29-31: mothers
+                for _mvn, _lbl in [("Bryanston","Bryanston"),("MTSanBarth","MT San Barth"),("GreenEagle","Green Eagle")]:
+                    _mr = [""] * 26; _mr[2] = _lbl; _mr[9] = _mv_conf.get(_mvn, 0)
+                    _cw.writerow(_mr)
+
+                _corr_csv_bytes = _cbuf.getvalue().encode("utf-8")
+                _corr_fname = f"stock_report_corrected_{_rd_conf}.csv"
+
+                st.download_button(
+                    "📥 Download Corrected Stock CSV",
+                    data=_corr_csv_bytes,
+                    file_name=_corr_fname,
+                    mime="text/csv",
+                    help=(
+                        "Downloads a re-uploadable Daily Stock Report CSV containing "
+                        "the corrected and confirmed volumes for all storage tanks, "
+                        "mother vessels, and daughter vessel ROBs. "
+                        "Upload this CSV in the Daily Stock Report section of another "
+                        "simulation session to reuse these corrected positions."
+                    ),
+                    key="download_corrected_csv_btn",
+                )
+            except Exception as _dce:
+                st.caption(f"CSV export unavailable: {_dce}")
 
         if st.session_state.get("_pdf_extracted"):
             _ex_preview = st.session_state["_pdf_extracted"]
@@ -8821,39 +8909,22 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             # the sticky top bar and the native bottom bar permanently on screen.
             _iframe_css = """
               *{box-sizing:border-box}
-              html,body{margin:0;padding:0;background:#fff;
-                         overflow:hidden;height:fit-content}
-              #wrap{
-                overflow-x:auto;
-                overflow-y:visible;
-                width:100%;
-              }
-              /* Sticky top scrollbar — always pinned to top of iframe viewport */
+              html,body{margin:0;padding:0;background:#fff}
+              /* Top mirror scrollbar — always visible at top of iframe */
               #top-scroll{
-                position:sticky;
-                top:0;
                 overflow-x:scroll;
                 overflow-y:hidden;
                 height:14px;
-                z-index:10;
                 background:#f1f5f9;
                 border-bottom:1px solid #cbd5e1;
                 border-top:1px solid #cbd5e1;
+                /* sticky keeps it pinned as iframe scrolls vertically */
+                position:sticky;
+                top:0;
+                z-index:10;
               }
               #top-scroll-inner{height:1px;display:block}
-              /* Left scrollbar track for visual reference */
-              #left-scroll-track{
-                position:fixed;
-                left:0;
-                top:0;
-                width:16px;
-                height:100%;
-                background:#f1f5f9;
-                border-right:1px solid #cbd5e1;
-                z-index:5;
-                pointer-events:none;
-              }
-              .jmp-wrap{overflow-x:auto;overflow-y:auto;padding:0;padding-left:16px}
+              .jmp-wrap{overflow-x:auto;overflow-y:visible;padding:0}
               .jmp-table{border-collapse:collapse;min-width:100%;font-size:11px;
                          font-family:'Segoe UI',system-ui,sans-serif}
               .jmp-table th{background:#1a2744;color:#ffffff;padding:5px 8px;
@@ -8885,11 +8956,8 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             _iframe_doc = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{_iframe_css}</style></head>
 <body>
-<div id="left-scroll-track"></div>
-<div id="wrap">
-  <div id="top-scroll"><div id="top-scroll-inner"></div></div>
-  {_table_html}
-</div>
+<div id="top-scroll"><div id="top-scroll-inner"></div></div>
+{_table_html}
 <script>
 (function(){{
   var top   = document.getElementById('top-scroll');
@@ -8931,8 +8999,9 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             # Height: subtract 2 header rows, estimate 26px per data row + top-bar overhead.
             # height:fit-content on body means no blank whitespace below the table.
             _data_trs = max(_table_html.count('<tr') - 2, 1)
-            _iframe_h = min(max(_data_trs * 26 + 46, 200), 4200)
-            _stc.html(_iframe_doc, height=_iframe_h, scrolling=False)
+            # 600px capped at 4200 — scrolling=True handles overflow vertically
+            _iframe_h = min(max(_data_trs * 26 + 46, 400), 4200)
+            _stc.html(_iframe_doc, height=_iframe_h, scrolling=True)
 
             # ── Legend ─────────────────────────────────────────────────────────────────
             _leg_html = '<div style="margin:10px 0 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'

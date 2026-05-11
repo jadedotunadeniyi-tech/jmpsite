@@ -2571,8 +2571,18 @@ class Simulation:
                  - self.mother_bbl[MOTHER_SECONDARY_NAME]) >= _min_cargo
         )
         _both_primaries_down = not _bryanston_available and not _greeneagle_available
+
+        # Export unavailability: treat as equivalent to both primaries down for
+        # MTO aggressiveness — raise parcel limit so the MTO vessel fills to its
+        # maximum transient capacity, maximising BIA stock accumulation while
+        # export is blocked.  Field storages drain faster; daughters return sooner.
+        _export_unavail_now = any(
+            _eu_s <= t < _eu_e
+            for (_eu_s, _eu_e) in getattr(self, 'export_unavailability_windows', [])
+        )
+        _escalate_mto = _both_primaries_down or _export_unavail_now
         _effective_parcel_limit = (
-            MTO_MAX_PARCELS_ESCALATED if _both_primaries_down
+            MTO_MAX_PARCELS_ESCALATED if _escalate_mto
             else MTO_MAX_PARCELS_BEFORE_OFFLOAD
         )
 
@@ -2608,7 +2618,7 @@ class Simulation:
                     f"[MTO Day {day_key+1}] No further top-ups — "
                     f"{'parcel limit reached' if _parcels_so_far >= _effective_parcel_limit else 'at capacity'} "
                     f"({existing_transient.cargo_bbl:,.0f}/{_trn_cap:,.0f} bbl) | "
-                    f"{'ESCALATED (both primaries down)' if _both_primaries_down else 'normal limit'} | "
+                    f"{'ESCALATED (export unavail)' if _export_unavail_now else 'ESCALATED (both primaries down)' if _both_primaries_down else 'normal limit'} | "
                     f"awaiting opportunistic mother berth",
                     voyage_num=existing_transient.current_voyage,
                 )
@@ -2769,7 +2779,7 @@ class Simulation:
         _hdroom_left = max(0.0, _cap_label - transient_v.cargo_bbl)
         self.log_event(
             t, transient_v.name, "MTO_TRANSIENT_NOMINATED",
-            f"[MTO Day {day_key+1} — Parcel {_parcel_num}/{MTO_MAX_PARCELS_BEFORE_OFFLOAD}] "
+            f"[MTO Day {day_key+1} — Parcel {_parcel_num}/{'ESCALATED' if _escalate_mto else MTO_MAX_PARCELS_BEFORE_OFFLOAD}] "
             f"Received {transfer_bbl:,.0f} bbl from {discharger_v.name} "
             f"@ {_dis_api:.2f}° API | on-board: {transient_v.cargo_bbl:,.0f} bbl "
             f"(cap {_cap_label:,.0f} bbl, {_hdroom_left:,.0f} bbl headroom remaining) | "
