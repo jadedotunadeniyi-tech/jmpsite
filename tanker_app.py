@@ -8565,8 +8565,22 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                 # ── Returning to load ─────────────────────────────────────────────────
                 _rets = _de["returning"]
                 if _rets:
+                    # Resolve "Point X storage area" → actual storage name
+                    _PT_STOR = {
+                        "A": "Chapel / JasmineS",
+                        "C": "Westmore",
+                        "D": "Duke (Awoba)",
+                        "E": "Starturn",
+                        "G": "PGM",
+                        "F": "Ibom",
+                    }
+                    def _ret_label(detail):
+                        _pm = re.search(r"Point ([A-G])", detail)
+                        if _pm:
+                            return _PT_STOR.get(_pm.group(1), f"Point {_pm.group(1)}")
+                        return detail.split("Arrived ")[-1].split(" —")[0]
                     _ret_vessel = "<br>".join(
-                        _chip(r["Vessel"], f"{r['Vessel']} → {r['Detail'].split('Arrived ')[-1].split(' —')[0]}")
+                        _chip(r["Vessel"], f"{r['Vessel']} → {_ret_label(r['Detail'])}")
                         for r in _rets
                     )
                     _ret_eta = "<br>".join(r["Time"][11:16] for r in _rets)
@@ -8807,12 +8821,12 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             # the sticky top bar and the native bottom bar permanently on screen.
             _iframe_css = """
               *{box-sizing:border-box}
-              html,body{margin:0;padding:0;background:#fff;overflow:hidden}
+              html,body{margin:0;padding:0;background:#fff;
+                         overflow:hidden;height:fit-content}
               #wrap{
                 overflow-x:auto;
-                overflow-y:auto;
-                max-height:600px;
-                position:relative;
+                overflow-y:visible;
+                width:100%;
               }
               /* Sticky top scrollbar — always pinned to top of iframe viewport */
               #top-scroll{
@@ -8914,10 +8928,10 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
 </script>
 </body></html>"""
 
-            # Initial height estimate: 28px per <tr> + 20px top-scroll bar + 16px left-track + 8px padding
-            # With max-height:600px in CSS, iframe will show both horizontal and vertical scrollbars
-            _tr_count  = _table_html.count('<tr')
-            _iframe_h  = min(max(_tr_count * 28 + 28, 650), 4200)
+            # Height: subtract 2 header rows, estimate 26px per data row + top-bar overhead.
+            # height:fit-content on body means no blank whitespace below the table.
+            _data_trs = max(_table_html.count('<tr') - 2, 1)
+            _iframe_h = min(max(_data_trs * 26 + 46, 200), 4200)
             _stc.html(_iframe_doc, height=_iframe_h, scrolling=False)
 
             # ── Legend ─────────────────────────────────────────────────────────────────
@@ -9040,7 +9054,7 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
                 # Returning vessel
                 _fret = _fde["returning"]
                 _fret_vessel = "<br>".join(
-                    _chip(r["Vessel"], f"{r['Vessel']} → {r['Detail'].split('Arrived ')[-1].split(' —')[0]}")
+                    _chip(r["Vessel"], f"{r['Vessel']} → {_ret_label(r['Detail'])}")
                     for r in _fret
                 ) if _fret else _idle()
                 _fret_eta = "<br>".join(r["Time"][11:16] for r in _fret) if _fret else _idle()
