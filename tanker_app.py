@@ -8797,12 +8797,19 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
             _html.append("</table></div>")
             _table_html = "\n".join(_html)
 
-            # ── Render in an iframe (components.v1.html) so JavaScript runs.
-            # st.markdown strips <script> tags — this is the only way to get
-            # a working top scrollbar that stays in sync with the bottom one.
+            # ── Render in an iframe so JS runs (st.markdown strips <script>).
+            # Structure:
+            #   [top-bar]   top scrollbar strip — always visible, synced via JS
+            #   [.jmp-wrap] table — native bottom scrollbar appears automatically
             _iframe_css = """
-              html,body{margin:0;padding:0;background:#fff;overflow-x:hidden}
-              .jmp-wrap{overflow-x:auto;padding:4px 0}
+              html,body{margin:0;padding:0;background:#fff}
+              #top-bar{
+                overflow-x:scroll;overflow-y:hidden;
+                height:16px;margin-bottom:2px;
+                border-bottom:1px solid #d1d5db;background:#f9fafb;
+              }
+              #top-bar-inner{height:1px;display:block}
+              .jmp-wrap{overflow-x:auto;padding:4px 0 0 0}
               .jmp-table{border-collapse:collapse;min-width:100%;font-size:11px;
                          font-family:'Segoe UI',system-ui,sans-serif}
               .jmp-table th{background:#1a2744;color:#ffffff;padding:5px 8px;
@@ -8823,42 +8830,44 @@ Generated {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')} | Tanker Operations Si
               .jmp-bia-entry{display:inline-block;border-radius:4px;padding:2px 6px;
                              margin:1px 0;font-size:10px;font-weight:600;
                              white-space:nowrap;line-height:1.5}
-              /* Top mirror scrollbar */
-              #top-bar{overflow-x:auto;overflow-y:hidden;height:16px;
-                       margin-bottom:2px;border-bottom:1px solid #e2e8f0}
-              #top-bar-inner{height:1px}
-              /* Bottom wrapper */
-              #bot-wrap{overflow-x:auto;padding:4px 0}
             """
 
             _iframe_doc = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<style>{_iframe_css}</style>
-</head><body>
+<html><head><meta charset="utf-8"><style>{_iframe_css}</style></head>
+<body>
 <div id="top-bar"><div id="top-bar-inner"></div></div>
-<div id="bot-wrap">{_table_html}</div>
+{_table_html}
 <script>
 (function(){{
-  var top    = document.getElementById('top-bar');
-  var tInner = document.getElementById('top-bar-inner');
-  var bot    = document.getElementById('bot-wrap');
-  function sync(){{
-    var tbl = bot.querySelector('table');
-    if(tbl) tInner.style.width = tbl.scrollWidth + 'px';
+  var bar   = document.getElementById('top-bar');
+  var inner = document.getElementById('top-bar-inner');
+  var wrap  = document.querySelector('.jmp-wrap');
+  if (!bar || !wrap) return;
+  function setWidth(){{
+    var tbl = wrap.querySelector('table');
+    if (tbl) inner.style.width = tbl.scrollWidth + 'px';
   }}
-  sync();
-  var lock = false;
-  top.addEventListener('scroll',function(){{if(lock)return;lock=true;bot.scrollLeft=top.scrollLeft;lock=false;}});
-  bot.addEventListener('scroll',function(){{if(lock)return;lock=true;top.scrollLeft=bot.scrollLeft;lock=false;}});
-  new MutationObserver(sync).observe(bot,{{childList:true,subtree:true}});
+  setWidth();
+  var busy = false;
+  bar.addEventListener('scroll', function(){{
+    if (busy) return; busy = true;
+    wrap.scrollLeft = bar.scrollLeft;
+    busy = false;
+  }});
+  wrap.addEventListener('scroll', function(){{
+    if (busy) return; busy = true;
+    bar.scrollLeft = wrap.scrollLeft;
+    busy = false;
+  }});
+  window.addEventListener('resize', setWidth);
 }})();
 </script>
 </body></html>"""
 
-            # Height: ~24 px per data row + 80 px for two header rows + 20 px top bar
-            _n_data_rows = _jmp_d1 - _jmp_d0 + 1
-            _iframe_height = min(_n_data_rows * 24 + 120, 3000)
-            _stc.html(_iframe_doc, height=_iframe_height, scrolling=False)
+            # Count actual <tr> tags for accurate height, 28px per row + 80px overhead
+            _tr_count  = _table_html.count('<tr')
+            _iframe_h  = min(max(_tr_count * 28 + 80, 300), 4000)
+            _stc.html(_iframe_doc, height=_iframe_h, scrolling=True)
 
             # ── Legend ─────────────────────────────────────────────────────────────────
             _leg_html = '<div style="margin:10px 0 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
